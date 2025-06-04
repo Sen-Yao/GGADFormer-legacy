@@ -126,11 +126,14 @@ torch.backends.cudnn.benchmark = False
 
 # Load and preprocess data
 adj, features, labels, all_idx, idx_train, idx_val, \
-idx_test, ano_label, str_ano_label, attr_ano_label, normal_label_idx, abnormal_label_idx = load_mat(args.dataset)
+idx_test, ano_label, str_ano_label, attr_ano_label, all_normal_idx, sample_normal_idx = load_mat(args.dataset)
+
 
 # ano_label 为异常节点标签
 # str_ano_label 为结构导致的异常
 # attr_ano_label 为属性导致的异常
+# all_normal_idx 为正常节点索引
+# sample_normal_idx 为采样的用于生成离群点的正常节点索引
 
 if args.dataset in ['Amazon', 'tf_finace', 'reddit', 'elliptic']:
     features, _ = preprocess_features(features)
@@ -234,11 +237,11 @@ for epoch in pbar:
     # Train model
     train_flag = True
     emb, emb_combine, logits, emb_con, emb_abnormal, con_loss = model(features, processed_seq1, adj,
-                                                            abnormal_label_idx, normal_label_idx,
+                                                            sample_normal_idx, all_normal_idx,
                                                             train_flag, args)
     # BCE loss
     lbl = torch.unsqueeze(torch.cat(
-        (torch.zeros(len(normal_label_idx)), torch.ones(len(emb_con)))),
+        (torch.zeros(len(all_normal_idx)), torch.ones(len(emb_con)))),
         1).unsqueeze(0).to(args.device)
     # print(f"lbl.shape: {lbl.shape}, logits.shape: {logits.shape}, emb_con.shape: {emb_con.shape}, emb_abnormal.shape: {emb_abnormal.shape}")
     # if torch.cuda.is_available():
@@ -262,8 +265,8 @@ for epoch in pbar:
     r_inv[torch.isinf(r_inv)] = 0.
     affinity = torch.sum(similar_matrix, 0) * r_inv
 
-    affinity_normal_mean = torch.mean(affinity[normal_label_idx])
-    affinity_abnormal_mean = torch.mean(affinity[abnormal_label_idx])
+    affinity_normal_mean = torch.mean(affinity[all_normal_idx])
+    affinity_abnormal_mean = torch.mean(affinity[sample_normal_idx])
 
     confidence_margin = 0.7
     # 论文里的 loss ala
@@ -301,7 +304,7 @@ for epoch in pbar:
     if epoch % test_gap == 0:
         model.eval()
         train_flag = False
-        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval = model(features, processed_seq1, adj, abnormal_label_idx, normal_label_idx,
+        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval = model(features, processed_seq1, adj, sample_normal_idx, all_normal_idx,
                                                                 train_flag, args)
         # evaluation on the valid and test node
         logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())

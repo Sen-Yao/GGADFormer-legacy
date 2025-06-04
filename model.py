@@ -283,28 +283,21 @@ class GGADFormer(nn.Module):
 
         self.to(args.device)
 
-    def forward(self, seq1, processed_seq1, adj, sample_abnormal_idx, normal_idx, train_flag, args, sparse=False):
+    def forward(self, seq1, processed_seq1, adj, sample_normal_idx, all_normal_idx, train_flag, args, sparse=False):
         seq1 = seq1.to(args.device)
         adj = adj.to(args.device)
-        # 用 GCN 或 SGT
 
-        # GCN：
-        #emb, con_loss = self.gcn2(self.gcn1(seq1, adj, sparse), adj, sparse), torch.tensor([0]).to(args.device)
-        attention_weights = None # 初始化
-        # GT only
-        if True:
-            emb = self.GT_pre_MLP(processed_seq1)
-            for i, l in enumerate(self.layers):
-                emb, current_attention_weights = self.layers[i](emb)
-                if i == len(self.layers) - 1: # 拿到最后一层的注意力
-                    attention_weights = current_attention_weights
-            # out = torch.split(emb, emb.shape[2] // 2, dim=2)
-            # att_emb, hop_emb = out[0], out[1]
-            # emb = att_emb * args.alpha + hop_emb * (1 - args.alpha)
-            emb = self.final_ln(emb)
-    
+        attention_weights = None # 初始化注意力权重
+        emb = self.GT_pre_MLP(processed_seq1)
+        for i, l in enumerate(self.layers):
+            emb, current_attention_weights = self.layers[i](emb)
+            if i == len(self.layers) - 1: # 拿到最后一层的注意力
+                attention_weights = current_attention_weights
+        emb = self.final_ln(emb)
         # emb: [1, num_nodes, hidden_dim]
         # attention_weights: [1, num_heads, num_nodes, num_nodes]
+
+        # 聚合不同注意力头的注意力
         if attention_weights is not None:
             agg_attention_weights = torch.mean(attention_weights, dim=1)
         else:
@@ -312,20 +305,18 @@ class GGADFormer(nn.Module):
 
         emb_con = None
         emb_combine = None
-        emb_abnormal = emb[:, sample_abnormal_idx, :]
+        emb_abnormal = emb[:, sample_normal_idx, :]
         
         noise = torch.randn(emb_abnormal.size()) * args.var + args.mean
         emb_abnormal = emb_abnormal + noise.to(args.device)
-        # emb_abnormal = emb_abnormal + noise.cuda()
         con_loss = torch.tensor([0]).to(args.device)
         if train_flag:
-
             # 获取全局上下文表示 h_CLS，[1, 1, hidden_dim]
             h_CLS = torch.mean(emb, dim=1, keepdim=True)
-            # 采样出的用于生成离群点的正常节点的上下文表示 h_p，[1, len(sample_abnormal_idx), hidden_dim]
-            h_p = emb[:, sample_abnormal_idx, :]
+            # 采样出的用于生成离群点的正常节点的上下文表示 h_p，[1, len(sample_normal_idx), hidden_dim]
+            h_p = emb[:, sample_normal_idx, :]
             h_CLS_expanded = h_CLS.expand_as(h_p)
-            # 拼接 h_p 和 h_CLS_expanded 作为 GenerateNet 的输入，[1, len(sample_abnormal_idx), 2 * hidden_dim]
+            # 拼接 h_p 和 h_CLS_expanded 作为 GenerateNet 的输入，[1, len(sample_normal_idx), 2 * hidden_dim]
             generate_net_input = torch.cat((h_p, h_CLS_expanded), dim=2)
             perturbation = self.generate_net(generate_net_input)
 
@@ -338,7 +329,7 @@ class GGADFormer(nn.Module):
                     h_p=h_p,
                     full_embeddings=emb, # 传递完整的 emb 以便获取所有节点的特征
                     agg_attention_weights=agg_attention_weights,
-                    sample_abnormal_idx=sample_abnormal_idx,
+                    sample_normal_idx=sample_normal_idx,
                     adj=adj,
                     args=args # 传递 args 以获取 topk_neighbors_attention
                 )
@@ -347,11 +338,11 @@ class GGADFormer(nn.Module):
 
             
             alpha = args.alpha_outlier_generation
-            # emb_con: [1, len(sample_abnormal_idx), hidden_dim]
+            # emb_con: [1, len(sample_normal_idx), hidden_dim]
             emb_con = h_p + alpha * perturbation + 0.1 * agg_perturbations # emb_con 现在是生成的离群点表示
 
-            # 构建 emb_combine, [1, num_normal_nodes + len(sample_abnormal_idx), hidden_dim]
-            emb_combine = torch.cat((emb[:, normal_idx, :], emb_con), 1)
+            # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
+            emb_combine = torch.cat((emb[:, all_normal_idx, :], emb_con), 1)
 
 
             f_1 = self.fc1(emb_combine)
@@ -361,7 +352,7 @@ class GGADFormer(nn.Module):
             f_3 = self.fc3(f_2)
             # f_3 = torch.sigmoid(f_3)
             # 替换采样节点的嵌入为新生成的离群点嵌入
-            emb[:, sample_abnormal_idx, :] = emb_con
+            emb[:, sample_normal_idx, :] = emb_con
 
             # For loss_contrastive calculation
 
@@ -370,7 +361,7 @@ class GGADFormer(nn.Module):
             emb_con_norm = torch.nn.functional.normalize(emb_con, p=2, dim=-1)
 
             # 正常节点与 h_CLS 的相似度
-            normal_nodes_emb_norm = emb_norm[:, normal_idx, :]
+            normal_nodes_emb_norm = emb_norm[:, all_normal_idx, :]
             sim_normal_to_cls = torch.sum(normal_nodes_emb_norm * h_CLS_norm.expand_as(normal_nodes_emb_norm), dim=-1) / args.temp
             
             mean_pos_sim = torch.mean(sim_normal_to_cls).item()
@@ -390,19 +381,19 @@ class GGADFormer(nn.Module):
             sim_gap_mean = mean_pos_sim - mean_neg_sim
             # print(f"  Mean Sim Gap (Pos - Neg): {sim_gap_mean:.4f}")
 
-            logits_normal_alignment = torch.cat([sim_normal_to_cls.unsqueeze(-1), sim_normal_to_outliers], dim=-1) # [1, len(normal_idx), 1 + len(sample_abnormal_idx)]
+            logits_normal_alignment = torch.cat([sim_normal_to_cls.unsqueeze(-1), sim_normal_to_outliers], dim=-1) # [1, len(normal_idx), 1 + len(sample_normal_idx)]
             labels_normal_alignment = torch.zeros(logits_normal_alignment.shape[1], dtype=torch.long).to(args.device).unsqueeze(0) # [1, len(normal_idx)]
             loss_normal_alignment_per_node = -torch.log_softmax(logits_normal_alignment, dim=-1)[:, :, 0]
             L_normal_alignment = torch.mean(loss_normal_alignment_per_node)
 
             # 构建离群点的负样本集合
-            # sim_outlier_to_cls_single 形状 [1, len(sample_abnormal_idx), 1]
+            # sim_outlier_to_cls_single 形状 [1, len(sample_normal_idx), 1]
             sim_outlier_to_cls_single = torch.sum(emb_con_norm * h_CLS_norm.expand_as(emb_con_norm), dim=-1, keepdim=True) / args.temp
-            # sim_outlier_to_normals 形状 [1, len(sample_abnormal_idx), len(normal_idx)]
+            # sim_outlier_to_normals 形状 [1, len(sample_normal_idx), len(normal_idx)]
             sim_outlier_to_normals = torch.bmm(emb_con_norm, normal_nodes_emb_norm.transpose(1, 2)) / args.temp
 
             # 将 h_CLS_norm 和 normal_nodes_emb_norm 作为离群点的负样本集合
-            # logits_outlier_separation 形状 [1, len(sample_abnormal_idx), 1 + len(normal_idx)]
+            # logits_outlier_separation 形状 [1, len(sample_normal_idx), 1 + len(normal_idx)]
             logits_outlier_separation = torch.cat([sim_outlier_to_cls_single, sim_outlier_to_normals], dim=-1)
 
             L_outlier_separation = torch.mean(torch.logsumexp(logits_outlier_separation, dim=-1))
@@ -410,7 +401,7 @@ class GGADFormer(nn.Module):
             con_loss = 1 * L_normal_alignment + 1 * L_outlier_separation
 
             # For loss calculation in main function
-            # emb_con [1, len(sample_abnormal_idx), hidden_dim] -> [len(sample_abnormal_idx), hidden_dim]
+            # emb_con [1, len(sample_normal_idx), hidden_dim] -> [len(sample_abnormal_idx), hidden_dim]
             emb_con = emb_con.squeeze(0)
             # con_loss = torch.tensor([0]).to(args.device)
             
@@ -424,7 +415,7 @@ class GGADFormer(nn.Module):
 
         return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss
     
-    def calculate_local_perturbation(self, h_p, full_embeddings, agg_attention_weights, sample_abnormal_idx, adj, args):
+    def calculate_local_perturbation(self, h_p, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
         list_agg_perturbations = []
         # 确保 full_embeddings, agg_attention_weights, adj 都是 [1, ...] 且在 device 上
         
@@ -434,7 +425,7 @@ class GGADFormer(nn.Module):
         # h_p 已经是从 full_embeddings 中取出的，这里用原始索引 p_idx 来从 full_embeddings 中取邻居
         # full_embeddings 形状 [1, num_nodes, hidden_dim]
 
-        for i, p_idx in enumerate(sample_abnormal_idx): # 遍历每个被选为离群点生成的原始正常节点
+        for i, p_idx in enumerate(sample_normal_idx): # 遍历每个被选为离群点生成的原始正常节点
             # 获取节点 p_idx 在聚合注意力矩阵中的行 [num_nodes]
             att_row_for_p = agg_attention_weights[0, p_idx, :] # 从 batch_size=1 的维度取
 
