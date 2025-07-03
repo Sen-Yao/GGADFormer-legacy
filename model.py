@@ -321,7 +321,7 @@ class GGADFormer(nn.Module):
             perturbation = self.generate_net(generate_net_input)
 
             # Enable or disable attention-based local perturbation
-            agg_attention_weights = None # 如果不需要注意力局部扰动，可以将其设置为 None
+            # agg_attention_weights = None # 如果不需要注意力局部扰动，可以将其设置为 None
 
             # 计算基于注意力局部扰动
             if agg_attention_weights is not None:
@@ -416,55 +416,77 @@ class GGADFormer(nn.Module):
         return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss
     
     def calculate_local_perturbation(self, h_p, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
-        list_agg_perturbations = []
-        # 确保 full_embeddings, agg_attention_weights, adj 都是 [1, ...] 且在 device 上
-        
-        # 调整 adj 的形状，方便索引。假设 adj 是 [1, num_nodes, num_nodes]
-        adj_matrix = adj.squeeze(0) # 形状 [num_nodes, num_nodes]
+        """
+        计算局部扰动，优化为批量操作。
 
-        # h_p 已经是从 full_embeddings 中取出的，这里用原始索引 p_idx 来从 full_embeddings 中取邻居
-        # full_embeddings 形状 [1, num_nodes, hidden_dim]
+        Args:
+            h_p (Tensor): 采样正常节点的嵌入，形状 [1, num_sampled_nodes, hidden_dim]。
+            full_embeddings (Tensor): 所有节点的完整嵌入，形状 [1, num_nodes, hidden_dim]。
+            agg_attention_weights (Tensor): 聚合注意力权重矩阵，形状 [1, num_nodes, num_nodes]。
+            sample_normal_idx (list or Tensor): 包含要生成离群点的原始正常节点索引的 Python 列表或 Tensor。
+            adj (Tensor): 邻接矩阵，形状 [1, num_nodes, num_nodes]，确保是布尔型或0/1。
+            args (Namespace): 包含 topk_neighbors_attention 和 hidden_dim。
 
-        for i, p_idx in enumerate(sample_normal_idx): # 遍历每个被选为离群点生成的原始正常节点
-            # 获取节点 p_idx 在聚合注意力矩阵中的行 [num_nodes]
-            att_row_for_p = agg_attention_weights[0, p_idx, :] # 从 batch_size=1 的维度取
+        Returns:
+            Tensor: 聚合的扰动，形状 [1, num_sampled_nodes, hidden_dim]。
+        """
+        # 将 list 转换为 Tensor
+        if isinstance(sample_normal_idx, list):
+            sample_normal_idx = torch.tensor(sample_normal_idx, dtype=torch.long, device=full_embeddings.device)
 
-            # 获取节点 p_idx 的邻居索引 (来自原始邻接矩阵 adj)
-            # adj_matrix 的 p_idx 行表示 p_idx 的邻居连接
-            # neighbor_indices 是一个 Tensor，包含邻居的实际索引
-            neighbor_indices = torch.nonzero(adj_matrix[p_idx]).squeeze(1)
+        num_sampled_nodes = sample_normal_idx.numel()
+        num_total_nodes = full_embeddings.shape[1]
+        hidden_dim = args.hidden_dim
+        device = full_embeddings.device
 
-            if neighbor_indices.numel() == 0: # 如果没有邻居
-                agg_h = torch.zeros_like(h_p[0, i, :]) # 返回零向量
-            else:
-                # 从这些邻居中，根据注意力分数选择 Top-k
-                # 获取这些邻居的注意力分数
-                attention_scores_of_neighbors = att_row_for_p[neighbor_indices]
+        if num_sampled_nodes == 0:
+            return torch.zeros(1, 0, hidden_dim, device=device)
 
-                # 确保 k 不超过实际邻居的数量
-                k = min(args.topk_neighbors_attention, neighbor_indices.numel())
-                if k == 0: # 再次检查 k 是否为 0
-                    agg_h = torch.zeros_like(h_p[0, i, :])
-                else:
-                    # 找到这些邻居中 Top-k 的索引（相对于 attention_scores_of_neighbors 的索引）
-                    topk_neighbor_attention_values, topk_relative_indices = torch.topk(attention_scores_of_neighbors, k=k, dim=-1)
-                    # 获取实际的 Top-k 邻居的索引
-                    topk_actual_neighbor_indices = neighbor_indices[topk_relative_indices]
+        # 1. 准备数据
+        # adj_matrix 形状: [num_total_nodes, num_total_nodes]
+        adj_matrix = adj.squeeze(0).bool() 
 
-                    # 获取这些 Top-k 邻居的嵌入
-                    topk_neighbor_embeddings = full_embeddings[0, topk_actual_neighbor_indices, :] # 形状 [k, hidden_dim]
+        # selected_att_weights 形状: [num_sampled_nodes, num_total_nodes]
+        selected_att_weights = agg_attention_weights[0, sample_normal_idx, :]
 
-                    # 聚合：使用加权平均，权重就是 Top-k 注意力值
-                    # 注意力权重需要归一化，因为 torch.softmax 已经做过，但 topk 筛选后可能需要重新归一化
-                    # 如果 sum(topk_neighbor_attention_values) 为 0，避免除以 0
-                    if topk_neighbor_attention_values.sum() > 0:
-                        normalized_weights = topk_neighbor_attention_values / topk_neighbor_attention_values.sum()
-                        agg_h = torch.sum(topk_neighbor_embeddings * normalized_weights.unsqueeze(-1), dim=0)
-                    else:
-                        agg_h = torch.zeros_like(h_p[0, i, :])
+        # masked_adj_rows 形状: [num_sampled_nodes, num_total_nodes]
+        masked_adj_rows = adj_matrix[sample_normal_idx]
 
-            list_agg_perturbations.append(agg_h)
+        # masked_att_weights 形状: [num_sampled_nodes, num_total_nodes]
+        masked_att_weights = selected_att_weights.clone()
+        masked_att_weights[~masked_adj_rows] = float('-inf') 
 
-        # 将列表转换为 Tensor，形状 [1, len(sample_abnormal_idx), hidden_dim]
-        agg_perturbations = torch.stack(list_agg_perturbations, dim=0).unsqueeze(0)
-        return agg_perturbations
+        # 2. 批处理 Top-K 选择
+        k = args.topk_neighbors_attention
+        k = min(k, num_total_nodes) 
+
+        topk_attention_values, topk_actual_neighbor_indices = torch.topk(masked_att_weights, k=k, dim=1)
+
+        # 3. 过滤无效 Top-K 结果
+        is_valid_topk_mask = (topk_attention_values != float('-inf'))
+
+        # 获取 Top-K 邻居的嵌入
+        # full_embeddings.squeeze(0) 的形状是 [num_nodes, hidden_dim]
+        embeddings_to_gather = full_embeddings.squeeze(0)
+
+        # 使用高级索引，这比 gather 更简洁且符合需求
+        # topk_actual_neighbor_indices 形状: [num_sampled_nodes, k]
+        # topk_neighbor_embeddings 期望形状: [num_sampled_nodes, k, hidden_dim]
+        topk_neighbor_embeddings = embeddings_to_gather[topk_actual_neighbor_indices]
+
+
+        # 4. 批处理聚合：使用加权平均
+        topk_attention_values_masked = topk_attention_values.clone()
+        topk_attention_values_masked[~is_valid_topk_mask] = 0.0
+
+        sum_topk_attention_values = topk_attention_values_masked.sum(dim=1, keepdim=True)
+
+        normalized_weights = torch.where(
+            sum_topk_attention_values > 0,
+            topk_attention_values_masked / sum_topk_attention_values,
+            torch.zeros_like(topk_attention_values_masked)
+        ).unsqueeze(-1)
+
+        aggregated_perturbations = torch.sum(topk_neighbor_embeddings * normalized_weights, dim=1)
+
+        return aggregated_perturbations.unsqueeze(0)
