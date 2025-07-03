@@ -322,6 +322,7 @@ class GGADFormer(nn.Module):
 
             # Enable or disable attention-based local perturbation
             # agg_attention_weights = None # 如果不需要注意力局部扰动，可以将其设置为 None
+            # agg_attention_weights = None # 如果不需要注意力局部扰动，可以将其设置为 None
 
             # 计算基于注意力局部扰动
             if agg_attention_weights is not None:
