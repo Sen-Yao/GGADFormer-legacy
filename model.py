@@ -339,8 +339,16 @@ class GGADFormer(nn.Module):
 
             
             alpha = args.alpha_outlier_generation
+            neigh_adj = adj[0, sample_normal_idx, :]
             # emb_con: [1, len(sample_normal_idx), hidden_dim]
-            emb_con = h_p + alpha * perturbation + 0.1 * agg_perturbations # emb_con 现在是生成的离群点表示
+            # 以下为原本的直接通过邻居节点通过 MLP 生成，现已改为通过 perturbation 生成离群点表示
+            emb_con_neighbor = self.act(self.fc4(torch.mm(neigh_adj, emb[0, :, :])))
+            # 严格按照原文，直接使用 emb_con_neighbor：
+            # emb_con = torch.unsqueeze(emb_con_neighbor, 0)
+            # 如果 emb_con 不使用注意力，而是类似原文的生成方式：
+            # emb_con = h_p + alpha * perturbation - 0 * emb_con_neighbor # emb_con 现在是生成的离群点表示
+            # 如果使用注意力：
+            emb_con = h_p + alpha * perturbation - 1e-2 * agg_perturbations # emb_con 现在是生成的离群点表示
 
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
             emb_combine = torch.cat((emb[:, all_normal_idx, :], emb_con), 1)
@@ -400,6 +408,8 @@ class GGADFormer(nn.Module):
             L_outlier_separation = torch.mean(torch.logsumexp(logits_outlier_separation, dim=-1))
             # 总的对比损失
             con_loss = 1 * L_normal_alignment + 1 * L_outlier_separation
+            # 设置 con_loss 为零以 debug
+            # con_loss = torch.zeros_like(L_normal_alignment).to(args.device)
 
             # For loss calculation in main function
             # emb_con [1, len(sample_normal_idx), hidden_dim] -> [len(sample_abnormal_idx), hidden_dim]

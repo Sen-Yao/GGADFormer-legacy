@@ -65,7 +65,7 @@ parser.add_argument('--temp', type=float, default=1,
 
 parser.add_argument('--alpha_outlier_generation', type=float, default=2,
                         help='alpha used in outlier generation')
-parser.add_argument('--topk_neighbors_attention', type=float, default=3,
+parser.add_argument('--topk_neighbors_attention', type=float, default=10,
                         help='topk neighbors attention')
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
 args = parser.parse_args()

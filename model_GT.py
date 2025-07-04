@@ -34,7 +34,7 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
 
         self.att_size = att_size = hidden_size // num_heads
-        self.scale = att_size ** -0.5
+        self.scale = 1
 
         self.linear_q = nn.Linear(hidden_size, num_heads * att_size)
         self.linear_k = nn.Linear(hidden_size, num_heads * att_size)
@@ -66,9 +66,7 @@ class MultiHeadAttention(nn.Module):
         if attn_bias is not None:
             x = x + attn_bias
 
-        x = torch.softmax(x, dim=3)
 
-        # print(x)
         # 这里的 x 就是经过 softmax 归一化的注意力权重
         attention_weights = torch.softmax(x, dim=3)
 
