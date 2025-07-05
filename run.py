@@ -279,7 +279,7 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = 0 * loss_margin + 1 * loss_bce + 1 * loss_rec + 0.1 * con_loss
+    loss = 0 * loss_margin + 1 * loss_bce + 1 * loss_rec + 1 * con_loss
 
     loss.backward()
     optimiser.step()
