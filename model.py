@@ -265,7 +265,7 @@ class GGADFormer(nn.Module):
         
 
         # GT only
-        self.GT_pre_MLP = nn.Linear(2 * 745, args.hidden_dim)
+        self.GT_pre_MLP = nn.Linear(2 * n_in, args.hidden_dim)
         encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
                     for _ in range(args.n_layers)]
         self.layers = nn.ModuleList(encoders)
@@ -284,6 +284,11 @@ class GGADFormer(nn.Module):
         self.to(args.device)
 
     def forward(self, seq1, processed_seq1, adj, sample_normal_idx, all_normal_idx, train_flag, args, sparse=False):
+        """
+        Args:
+            sample_normal_idx (list): 包含采样节点的索引的 Python 列表。在半监督场景下，模型在训练时只能看到这些节点是被标记为正常的
+            all_normal_idx (list): 包含所有正常节点的索引的 Python 列表。在半监督场景下，模型在训练时不应该能直接看到所有正常节点的标签。仅用于返回训练结果时生成损失
+        """
         seq1 = seq1.to(args.device)
         adj = adj.to(args.device)
 
@@ -370,8 +375,6 @@ class GGADFormer(nn.Module):
             # 替换采样节点的嵌入为新生成的离群点嵌入
             # 创建 emb 的一个副本，并在副本上进行修改
             # 这样做可以确保原始的 emb 不被修改，从而允许 PyTorch 正常计算梯度
-            emb = emb.clone()
-            emb[:, sample_normal_idx, :] = emb_con
 
             # For loss_contrastive calculation
 
@@ -380,12 +383,14 @@ class GGADFormer(nn.Module):
             new_global_center_for_loss = torch.mean(h_attn_weighted_mean, dim=1, keepdim=True)
             global_center_norm = torch.nn.functional.normalize(new_global_center_for_loss, p=2, dim=-1)
             
+            # 对所有节点归一化后与中心的相似度
             emb_norm = torch.nn.functional.normalize(emb, p=2, dim=-1)
-            emb_con_norm = torch.nn.functional.normalize(emb_con, p=2, dim=-1)
 
-            # 正常节点与 h_CLS 的相似度
+            # 找出正常节点，并计算标记节点对
             normal_nodes_emb_norm = emb_norm[:, all_normal_idx, :]
             sim_normal_to_cls = torch.sum(normal_nodes_emb_norm * global_center_norm.expand_as(normal_nodes_emb_norm), dim=-1) / args.temp
+
+            emb_con_norm = torch.nn.functional.normalize(emb_con, p=2, dim=-1)
             
             mean_pos_sim = torch.mean(sim_normal_to_cls).item()
             std_pos_sim = torch.std(sim_normal_to_cls).item()

@@ -141,9 +141,9 @@ else:
     features = features.todense()
 
 print("Training on device:", args.device)
-
+print("Converting adjacency matrix to dgl format....")
 dgl_graph = adj_to_dgl_graph(adj)
-
+print("Convert Done!")
 nb_nodes = features.shape[0]
 ft_size = features.shape[1]
 raw_adj = adj
@@ -224,7 +224,8 @@ records = {
     'test_AUC': [],
     'test_AP': [],
     'best_test_auc': 0.0,
-    'best_test_auc_epoch': 0
+    'best_test_AP': 0.0,
+    'best_test_epoch': 0
 }
 
 test_gap = 5
@@ -316,6 +317,7 @@ for epoch in pbar:
         records['test_AP'].append(last_AP.item())
         if last_auc > records['best_test_auc']:
             records['best_test_auc'] = last_auc
+            records['best_test_AP'] = last_AP
             records['best_test_auc_epoch'] = epoch
     pbar.set_postfix({
         'time': f'{total_time:.2f}s',
@@ -365,4 +367,4 @@ plt.show()
 
 print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dataset}_loss_and_auc_trends.png')}'")
 
-print(f"Best Test AUC: {records['best_test_auc']:.5f} at Epoch: {records['best_test_auc_epoch']}")
+print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
