@@ -145,10 +145,50 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1):
     return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx
 
 
-def adj_to_dgl_graph(adj):
-    """Convert adjacency matrix to dgl format."""
+def adj_to_dgl_graph(adj, dataset_name: str = None):
+    """
+    Convert adjacency matrix to DGLGraph format, with caching mechanism.
+
+    Args:
+        adj: The adjacency matrix (scipy.sparse.csr_matrix).
+        dataset_name (str, optional): The name of the dataset. If provided,
+                                      the function will check for a cached DGLGraph
+                                      and save it after conversion. Defaults to None.
+
+    Returns:
+        dgl.DGLGraph: The converted DGLGraph.
+    """
+    if dataset_name:
+        cache_dir = "./dataset/dgl_cache"
+        os.makedirs(cache_dir, exist_ok=True) # Ensure cache directory exists
+        cache_path = os.path.join(cache_dir, f"{dataset_name}_dgl_graph.bin")
+
+        if os.path.exists(cache_path):
+            print(f"Loading DGLGraph for '{dataset_name}' from cache...")
+            try:
+                # dgl.load_graphs returns a list of graphs and a list of labels/meta_dicts
+                glist, _ = dgl.load_graphs(cache_path)
+                if glist:
+                    return glist[0]
+                else:
+                    print("Cache file empty or corrupted, re-converting...")
+            except Exception as e:
+                print(f"Error loading from cache: {e}. Re-converting...")
+
+    # If no dataset_name or cache not found/corrupted, perform conversion
+    print(f"Converting adjacency matrix to DGLGraph for '{dataset_name if dataset_name else 'unnamed'}'...")
     nx_graph = nx.from_scipy_sparse_array(adj)
-    dgl_graph = dgl.DGLGraph(nx_graph)
+    # DGLGraph should be created from NetworkX graph directly for feature compatibility
+    # Ensure all nodes are included even if they have no edges in nx_graph
+    dgl_graph = dgl.from_networkx(nx_graph)
+
+    if dataset_name:
+        try:
+            dgl.save_graphs(cache_path, [dgl_graph]) # dgl.save_graphs expects a list of graphs
+            print(f"DGLGraph for '{dataset_name}' saved to cache at {cache_path}.")
+        except Exception as e:
+            print(f"Warning: Could not save DGLGraph to cache: {e}")
+
     return dgl_graph
 
 

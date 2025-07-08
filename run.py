@@ -141,13 +141,10 @@ else:
     features = features.todense()
 
 print("Training on device:", args.device)
-print("Converting adjacency matrix to dgl format....")
-dgl_graph = adj_to_dgl_graph(adj)
-print("Convert Done!")
+dgl_graph = adj_to_dgl_graph(adj, args.dataset)
 nb_nodes = features.shape[0]
 ft_size = features.shape[1]
 raw_adj = adj
-print(adj.sum())
 adj = normalize_adj(adj)
 
 raw_adj = (raw_adj + sp.eye(raw_adj.shape[0])).todense()
