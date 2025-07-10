@@ -307,12 +307,12 @@ def draw_pdf_methods(method, message_normal, message_abnormal, message_real_abno
     plt.close()
 
 
-def node_neighborhood_feature(adj, features, k):
+def node_neighborhood_feature(adj, features, k, alpha=0.1):
 
     x_0 = features
     for i in range(k):
         # print(f"features.shape: {features.shape}, adj.shape: {adj.shape}")
-        features = 0.9 * torch.mm(adj, features) + 0.1 * x_0
+        features = (1-alpha) * torch.mm(adj, features) + alpha * x_0
 
     return features
 
