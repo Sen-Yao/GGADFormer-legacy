@@ -36,44 +36,6 @@ class GCN(nn.Module):
         return self.act(out)
 
 
-class AvgReadout(nn.Module):
-    def __init__(self):
-        super(AvgReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.mean(seq, 1)
-
-
-class MaxReadout(nn.Module):
-    def __init__(self):
-        super(MaxReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.max(seq, 1).values
-
-
-class MinReadout(nn.Module):
-    def __init__(self):
-        super(MinReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.min(seq, 1).values
-
-
-class WSReadout(nn.Module):
-    def __init__(self):
-        super(WSReadout, self).__init__()
-
-    def forward(self, seq, query):
-        query = query.permute(0, 2, 1)
-        sim = torch.matmul(seq, query)
-        sim = F.softmax(sim, dim=1)
-        sim = sim.repeat(1, 1, 64)
-        out = torch.mul(seq, sim)
-        out = torch.sum(out, 1)
-        return out
-
-
 class Discriminator(nn.Module):
     def __init__(self, n_h, negsamp_round):
         super(Discriminator, self).__init__()
@@ -108,9 +70,8 @@ class Discriminator(nn.Module):
 
 
 class GGADFormer(nn.Module):
-    def __init__(self, n_in, n_h, activation, negsamp_round, readout, args):
+    def __init__(self, n_in, n_h, activation, negsamp_round, args):
         super(GGADFormer, self).__init__()
-        self.read_mode = readout
         self.gcn1 = GCN(n_in, n_h, activation)
         self.gcn2 = GCN(n_h, n_h, activation)
         # self.gcn3 = GCN(n_h, n_h, activation)
@@ -121,14 +82,6 @@ class GGADFormer(nn.Module):
         self.fc6 = nn.Linear(n_h, n_h, bias=False)
         self.fc5 = nn.Linear(n_h, n_in, bias=False)
         self.act = nn.ReLU()
-        if readout == 'max':
-            self.read = MaxReadout()
-        elif readout == 'min':
-            self.read = MinReadout()
-        elif readout == 'avg':
-            self.read = AvgReadout()
-        elif readout == 'weighted_sum':
-            self.read = WSReadout()
 
         self.disc = Discriminator(n_h, negsamp_round)
         self.SGT = SGT(n_layers=args.n_layers,
@@ -143,15 +96,15 @@ class GGADFormer(nn.Module):
         
 
         # GT only
-        self.GT_pre_MLP = nn.Linear(2 * n_in + args.community_embedding_dim, args.hidden_dim)
+        self.token_projection = nn.Linear(2 * n_in + args.community_embedding_dim, args.hidden_dim)
         encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
                     for _ in range(args.n_layers)]
         self.layers = nn.ModuleList(encoders)
         self.final_ln = nn.LayerNorm(args.hidden_dim)
         
         # To generate outlier nodes
-        self.generate_net = nn.Sequential(
-            nn.Linear(args.hidden_dim * 2, args.hidden_dim), # 输入是 h_p 和 h_attn_weighted_mean 的拼接
+        self.bias_generator = nn.Sequential(
+            nn.Linear(args.hidden_dim * 2, args.hidden_dim), # 输入是 emb_sampled 和 h_attn_weighted_mean 的拼接
             nn.ReLU(),
             nn.Linear(args.hidden_dim, args.hidden_dim),
             nn.ReLU(),
@@ -169,17 +122,15 @@ class GGADFormer(nn.Module):
 
         self.to(args.device)
 
-    def forward(self, seq1, processed_seq1, adj, sample_normal_idx, all_normal_idx, community_H, train_flag, args, sparse=False):
+    def forward(self, concated_input_features, adj, sample_normal_idx, all_labeled_normal_idx, community_H, train_flag, args, sparse=False):
         """
         Args:
-            sample_normal_idx (list): 包含采样节点的索引的 Python 列表。在半监督场景下，模型在训练时只能看到这些节点是被标记为正常的
-            all_normal_idx (list): 包含所有正常节点的索引的 Python 列表。在半监督场景下，模型在训练时不应该能直接看到所有正常节点的标签。仅用于返回训练结果时生成损失
+            sample_normal_idx (list): 包含采样节点的索引的 Python 列表。这些节点将在模型中用于生成离群点
+            all_labeled_normal_idx (list): 包含所有标记节点的索引的 Python 列表。在半监督场景下，模型在训练时只能看到这些节点是被标记为正常的
         """
-        seq1 = seq1.to(args.device)
-        adj = adj.to(args.device)
 
         attention_weights = None # 初始化注意力权重
-        emb = self.GT_pre_MLP(processed_seq1)
+        emb = self.token_projection(concated_input_features)
         for i, l in enumerate(self.layers):
             emb, current_attention_weights = self.layers[i](emb)
             if i == len(self.layers) - 1: # 拿到最后一层的注意力
@@ -203,8 +154,8 @@ class GGADFormer(nn.Module):
         con_loss = torch.tensor([0]).to(args.device)
         gui_loss = torch.tensor([0]).to(args.device)
         if train_flag:
-            # 采样出的用于生成离群点的正常节点的上下文表示 h_p，[1, len(sample_normal_idx), hidden_dim]
-            h_p = emb[:, sample_normal_idx, :]
+            # 采样出的用于生成离群点的正常节点的上下文表示 emb_sampled，[1, len(sample_normal_idx), hidden_dim]
+            emb_sampled = emb[:, sample_normal_idx, :]
             # 传统的均值，直接取平均，即 h_mean = torch.mean(emb, dim=1, keepdim=True)
             # 改进：基于注意力加权的均值。先提取采样节点对应的权重
             selected_query_attention = agg_attention_weights[:, sample_normal_idx, :] # selected_query_attention 形状: [1, len(sample_normal_idx), num_nodes]
@@ -217,10 +168,10 @@ class GGADFormer(nn.Module):
                 h_attn_weighted_mean = torch.bmm(selected_query_attention, emb)
             
             # Ablation Study only
-            h_mean = torch.mean(emb, dim=1, keepdim=True).expand_as(h_p)
-            # 拼接 h_p 和 h_attn_weighted_mean 作为 GenerateNet 的输入，[1, len(sample_normal_idx), 2 * hidden_dim]
-            generate_net_input = torch.cat((h_p, h_attn_weighted_mean), dim=2)
-            perturbation = self.generate_net(generate_net_input)
+            h_mean = torch.mean(emb, dim=1, keepdim=True).expand_as(emb_sampled)
+            # 拼接 emb_sampled 和 h_attn_weighted_mean 作为 GenerateNet 的输入，[1, len(sample_normal_idx), 2 * hidden_dim]
+            generate_net_input = torch.cat((emb_sampled, h_attn_weighted_mean), dim=2)
+            perturbation = self.bias_generator(generate_net_input)
 
             # Enable or disable attention-based local perturbation
             # agg_attention_weights = None # 如果不需要注意力局部扰动，可以将其设置为 None
@@ -228,7 +179,7 @@ class GGADFormer(nn.Module):
             # 计算基于注意力局部扰动
             if agg_attention_weights is not None:
                 agg_perturbations = self.calculate_local_perturbation(
-                    h_p=h_p,
+                    emb_sampled=emb_sampled,
                     full_embeddings=emb, # 传递完整的 emb 以便获取所有节点的特征
                     agg_attention_weights=agg_attention_weights,
                     sample_normal_idx=sample_normal_idx,
@@ -236,7 +187,7 @@ class GGADFormer(nn.Module):
                     args=args # 传递 args 以获取 topk_neighbors_attention
                 )
             else:
-                agg_perturbations = torch.zeros_like(h_p) # 如果没有注意力，局部扰动为0
+                agg_perturbations = torch.zeros_like(emb_sampled) # 如果没有注意力，局部扰动为0
 
             
             alpha = args.alpha_outlier_generation
@@ -247,12 +198,12 @@ class GGADFormer(nn.Module):
             # 严格按照原文，直接使用 emb_con_neighbor：
             # emb_con = torch.unsqueeze(emb_con_neighbor, 0)
             # 如果 emb_con 不使用注意力，而是类似原文的生成方式：
-            # emb_con = h_p + alpha * perturbation - 0 * emb_con_neighbor # emb_con 现在是生成的离群点表示
+            # emb_con = emb_sampled + alpha * perturbation - 0 * emb_con_neighbor # emb_con 现在是生成的离群点表示
             # 如果使用注意力：
-            emb_con = h_p + 2 * perturbation - 1e-2 * agg_perturbations # emb_con 现在是生成的离群点表示
+            emb_con = emb_sampled + 2 * perturbation - 1e-2 * agg_perturbations # emb_con 现在是生成的离群点表示
 
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
-            emb_combine = torch.cat((emb[:, all_normal_idx, :], emb_con), 1)
+            emb_combine = torch.cat((emb[:, all_labeled_normal_idx, :], emb_con), 1)
 
             # 计算社区引导损失：
             if community_H is not None:
@@ -275,41 +226,39 @@ class GGADFormer(nn.Module):
             # 这样做可以确保原始的 emb 不被修改，从而允许 PyTorch 正常计算梯度
 
             # For loss_contrastive calculation
-
-            # 定义用于对比学习的全局中心：对 h_attn_weighted_mean 求平均
-            # new_global_center_for_loss: [1, 1, hidden_dim]
-            new_global_center_for_loss = torch.mean(h_attn_weighted_mean, dim=1, keepdim=True)
-            global_center_norm = torch.nn.functional.normalize(new_global_center_for_loss, p=2, dim=-1)
+            # 首先进行「拉近」正常节点与全局中心的距离
+            # 定义用于对比学习的全局中心：对 h_attn_weighted_mean 求平均并归一化，得到一个全局的 Global Center
+            global_center_norm = torch.nn.functional.normalize(torch.mean(h_attn_weighted_mean, dim=1, keepdim=True), p=2, dim=-1)
             
-            # 对所有节点归一化后与中心的相似度
+            # 对所有节点归一化
             emb_norm = torch.nn.functional.normalize(emb, p=2, dim=-1)
 
-            # 找出正常节点，并计算标记节点对
-            normal_nodes_emb_norm = emb_norm[:, all_normal_idx, :]
+            # 找出所有标记的正常节点，并计算所有标记节点到全局中心的相似度
+            normal_nodes_emb_norm = emb_norm[:, all_labeled_normal_idx, :]
             sim_normal_to_cls = torch.sum(normal_nodes_emb_norm * global_center_norm.expand_as(normal_nodes_emb_norm), dim=-1) / args.temp
-
-            emb_con_norm = torch.nn.functional.normalize(emb_con, p=2, dim=-1)
-            
+            # 这些相似度的统计信息
             mean_pos_sim = torch.mean(sim_normal_to_cls).item()
             std_pos_sim = torch.std(sim_normal_to_cls).item()
 
 
-            # 正常节点与所有生成的离群点的相似度
+            # 计算所有标记节点与所有生成的离群点的相似度
+            emb_con_norm = torch.nn.functional.normalize(emb_con, p=2, dim=-1)
             sim_normal_to_outliers = torch.bmm(normal_nodes_emb_norm, emb_con_norm.transpose(1, 2)) / args.temp
-            sum_exp_neg_normal = torch.sum(torch.exp(sim_normal_to_outliers), dim=-1)
-
+            # 这些相似度的统计信息
             mean_neg_sim = torch.mean(sim_normal_to_outliers).item()
             std_neg_sim = torch.std(sim_normal_to_outliers).item()
 
             # print(f"  Normal-CLS Sim (Positive): Mean={mean_pos_sim:.4f}, Std={std_pos_sim:.4f}")
             # print(f"  Normal-Outlier Sim (Negative): Mean={mean_neg_sim:.4f}, Std={std_neg_sim:.4f}")
-
             sim_gap_mean = mean_pos_sim - mean_neg_sim
             # print(f"  Mean Sim Gap (Pos - Neg): {sim_gap_mean:.4f}")
 
+            # 对于每一个正常的节点，它与“正常全局中心”的相似度应该远高于它与“所有生成的离群点”的相似度。
+            # 对于每个正常节点，我们得到了一个 logits_normal_alignment 向量，其中第一个元素是它作为正例的得分，后面 len(sample_normal_idx) 个元素是它作为负例的得分。
             logits_normal_alignment = torch.cat([sim_normal_to_cls.unsqueeze(-1), sim_normal_to_outliers], dim=-1) # [1, len(normal_idx), 1 + len(sample_normal_idx)]
-            labels_normal_alignment = torch.zeros(logits_normal_alignment.shape[1], dtype=torch.long).to(args.device).unsqueeze(0) # [1, len(normal_idx)]
+            # 计算了每个正常节点的负对数似然。对于一个正常的节点，它会得到一个关于“与中心相似”的对数概率，以及一组关于“与离群点相似”的对数概率。
             loss_normal_alignment_per_node = -torch.log_softmax(logits_normal_alignment, dim=-1)[:, :, 0]
+            # 计算所有正常节点的平均损失。
             L_normal_alignment = torch.mean(loss_normal_alignment_per_node)
 
             # 构建离群点的负样本集合
@@ -343,12 +292,12 @@ class GGADFormer(nn.Module):
 
         return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss, gui_loss
     
-    def calculate_local_perturbation(self, h_p, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
+    def calculate_local_perturbation(self, emb_sampled, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
         """
         根据节点的注意力，计算邻居节点可以带来的局部扰动
 
         Args:
-            h_p (Tensor): 采样正常节点的嵌入，形状 [1, num_sampled_nodes, hidden_dim]。
+            emb_sampled (Tensor): 采样正常节点的嵌入，形状 [1, num_sampled_nodes, hidden_dim]。
             full_embeddings (Tensor): 所有节点的完整嵌入，形状 [1, num_nodes, hidden_dim]。
             agg_attention_weights (Tensor): 聚合注意力权重矩阵，形状 [1, num_nodes, num_nodes]。
             sample_normal_idx (list or Tensor): 包含要生成离群点的原始正常节点索引的 Python 列表或 Tensor。

@@ -130,13 +130,13 @@ torch.backends.cudnn.benchmark = False
 
 # Load and preprocess data
 adj, features, labels, all_idx, idx_train, idx_val, \
-idx_test, ano_label, str_ano_label, attr_ano_label, all_normal_idx, sample_normal_idx = load_mat(args.dataset)
+idx_test, ano_label, str_ano_label, attr_ano_label, all_labeled_normal_idx, sample_normal_idx = load_mat(args.dataset)
 
 
 # ano_label 为异常节点标签
 # str_ano_label 为结构导致的异常
 # attr_ano_label 为属性导致的异常
-# all_normal_idx 为正常节点索引
+# all_labeled_normal_idx 为半监督场景下的标记节点索引
 # sample_normal_idx 为采样的用于生成离群点的正常节点索引
 
 if args.dataset in ['Amazon', 'tf_finace', 'reddit', 'elliptic']:
@@ -183,17 +183,17 @@ community_H, community_ae_model = train_community_detection_module(
 )
 
 # Initialize model and optimiser
-model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args.negsamp_ratio, args.readout, args)
+model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args.negsamp_ratio, args)
 processed_features = preprocess_sample_features(args, features.squeeze(0), adj.squeeze(0))
 processed_features = processed_features.to(args.device)
 
 # For GT only
 # Only use the 0-hop and the last hop features
 prop_seq1 = node_neighborhood_feature(adj.squeeze(0), features.squeeze(0), args.pp_k).to(args.device).unsqueeze(0)
-processed_seq1 = torch.concat((features.to(args.device), prop_seq1), dim=2)
+concated_input_features = torch.concat((features.to(args.device), prop_seq1), dim=2)
 # Add community embedding to the processed features
 community_H_reshaped = community_H.unsqueeze(0) # -> (1, num_nodes, community_embedding_dim)
-processed_seq1 = torch.concat((processed_seq1, community_H.unsqueeze(0)), dim=2)
+concated_input_features = torch.concat((concated_input_features, community_H.unsqueeze(0)), dim=2)
 
 # Disable Matrix Multiplication for ablation study
 # processed_seq1 = features.to(args.device)
@@ -259,12 +259,12 @@ for epoch in pbar:
 
     # Train model
     train_flag = True
-    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, gui_loss = model(features, processed_seq1, adj,
-                                                            sample_normal_idx, all_normal_idx, community_H,
+    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, gui_loss = model(concated_input_features, adj.to(args.device),
+                                                            sample_normal_idx, all_labeled_normal_idx, community_H,
                                                             train_flag, args)
     # BCE loss
     lbl = torch.unsqueeze(torch.cat(
-        (torch.zeros(len(all_normal_idx)), torch.ones(len(emb_con)))),
+        (torch.zeros(len(all_labeled_normal_idx)), torch.ones(len(emb_con)))),
         1).unsqueeze(0).to(args.device)
     # print(f"lbl.shape: {lbl.shape}, logits.shape: {logits.shape}, emb_con.shape: {emb_con.shape}, emb_abnormal.shape: {emb_abnormal.shape}")
     # if torch.cuda.is_available():
@@ -304,7 +304,7 @@ for epoch in pbar:
     if epoch % test_gap == 0:
         model.eval()
         train_flag = False
-        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(features, processed_seq1, adj, sample_normal_idx, all_normal_idx, community_H, 
+        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, community_H, 
                                                                 train_flag, args)
         # evaluation on the valid and test node
         logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())

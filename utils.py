@@ -105,15 +105,10 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1):
     print('Training', Counter(np.squeeze(ano_labels[idx_train])))
     print('Test', Counter(np.squeeze(ano_labels[idx_test])))
     # Sample some labeled normal nodes
-    all_normal_label_idx = [i for i in idx_train if ano_labels[i] == 0]
+    all_normal_idx = [i for i in idx_train if ano_labels[i] == 0]
     rate = 0.5  #  change train_rate to 0.3 0.5 0.6  0.8
-    normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * rate)]
+    all_labeled_normal_idx = all_normal_idx[: int(len(all_normal_idx) * rate)]
     print('Training rate', rate)
-
-    # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.2)]
-    # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.25)]
-    # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.15)]
-    # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.10)]
 
     # contamination
     # real_abnormal_id = np.array(all_idx)[np.argwhere(ano_labels == 1).squeeze()].tolist()
@@ -139,13 +134,13 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1):
     # replace_rate = 0.05 * normal_feat.shape[1]
     # feat[real_abnormal_id, :int(replace_rate)] = normal_feat[:, :int(replace_rate)]
 
-    random.shuffle(normal_label_idx)
+    random.shuffle(all_labeled_normal_idx)
     # 0.05 for Amazon and 0.15 for other datasets
     if dataset in ['Amazon']:
-        abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.05)]  
+        sample_normal_idx = all_labeled_normal_idx[: int(len(all_labeled_normal_idx) * 0.05)]  
     else:
-        abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.15)]  
-    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx
+        sample_normal_idx = all_labeled_normal_idx[: int(len(all_labeled_normal_idx) * 0.15)]  
+    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, all_labeled_normal_idx, sample_normal_idx
 
 
 def adj_to_dgl_graph(adj, dataset_name: str = None):
