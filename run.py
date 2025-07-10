@@ -68,6 +68,11 @@ parser.add_argument('--alpha_outlier_generation', type=float, default=2,
 parser.add_argument('--topk_neighbors_attention', type=float, default=10,
                         help='topk neighbors attention')
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
+
+# community parameters
+parser.add_argument('--community_embedding_dim', type=int, default=32, help='Dimension of the community embedding')
+
+
 args = parser.parse_args()
 if args.device >= 0 and torch.cuda.is_available():
         args.device = f'cuda:{args.device}'
@@ -163,14 +168,34 @@ labels = torch.FloatTensor(labels[np.newaxis])
 # idx_val = torch.LongTensor(idx_val)
 # idx_test = torch.LongTensor(idx_test)
 
+# Community Training
+
+COMMUNITY_AE_EPOCHS = 1000
+COMMUNITY_AE_LR = 1e-3
+COMMUNITY_AE_HIDDEN_DIMS = [128, 64] # Example: Two hidden layers for autoencoder
+print("Starting Community Detection Module setup...")
+community_H, community_ae_model = train_community_detection_module(
+    adj_original=raw_adj,  # Pass your original adj matrix here
+    device=args.device,
+    epochs=COMMUNITY_AE_EPOCHS,
+    lr=COMMUNITY_AE_LR,
+    hidden_dims=COMMUNITY_AE_HIDDEN_DIMS,
+    community_embedding_dim=args.community_embedding_dim,
+)
+
 # Initialize model and optimiser
 model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args.negsamp_ratio, args.readout, args)
 processed_features = preprocess_sample_features(args, features.squeeze(0), adj.squeeze(0))
 processed_features = processed_features.to(args.device)
 
 # For GT only
+# Only use the 0-hop and the last hop features
 prop_seq1 = node_neighborhood_feature(adj.squeeze(0), features.squeeze(0), args.pp_k).to(args.device).unsqueeze(0)
 processed_seq1 = torch.concat((features.to(args.device), prop_seq1), dim=2)
+# Add community embedding to the processed features
+community_H_reshaped = community_H.unsqueeze(0) # -> (1, num_nodes, community_embedding_dim)
+processed_seq1 = torch.concat((processed_seq1, community_H.unsqueeze(0)), dim=2)
+
 # Disable Matrix Multiplication for ablation study
 # processed_seq1 = features.to(args.device)
 

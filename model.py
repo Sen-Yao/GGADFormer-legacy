@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from model_GT import SGT, EncoderLayer, FeedForwardNetwork, MultiHeadAttention
-from utils import node_neighborhood_feature
 
 class GCN(nn.Module):
     def __init__(self, in_ft, out_ft, act, bias=True):
@@ -265,7 +264,7 @@ class GGADFormer(nn.Module):
         
 
         # GT only
-        self.GT_pre_MLP = nn.Linear(2 * n_in, args.hidden_dim)
+        self.GT_pre_MLP = nn.Linear(2 * n_in + args.community_embedding_dim, args.hidden_dim)
         encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
                     for _ in range(args.n_layers)]
         self.layers = nn.ModuleList(encoders)
@@ -520,3 +519,34 @@ class GGADFormer(nn.Module):
         aggregated_perturbations = torch.sum(topk_neighbor_embeddings * normalized_weights, dim=1)
 
         return aggregated_perturbations.unsqueeze(0)
+    
+
+class CommunityAutoencoder(nn.Module):
+    def __init__(self, input_dim, hidden_dims, output_dim):
+        super(CommunityAutoencoder, self).__init__()
+        # Encoder
+        encoder_layers = []
+        in_dim = input_dim
+        for h_dim in hidden_dims:
+            encoder_layers.append(nn.Linear(in_dim, h_dim))
+            encoder_layers.append(nn.ReLU()) # Or nn.Sigmoid() as per ComGA
+            in_dim = h_dim
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        # Latent space (Community Embedding H)
+        self.latent_layer = nn.Linear(in_dim, output_dim)
+
+        # Decoder
+        decoder_layers = []
+        in_dim = output_dim
+        for h_dim in reversed(hidden_dims): # Reverse hidden dims for decoder
+            decoder_layers.append(nn.Linear(in_dim, h_dim))
+            decoder_layers.append(nn.ReLU()) # Or nn.Sigmoid()
+            in_dim = h_dim
+        decoder_layers.append(nn.Linear(in_dim, input_dim)) # Output should match input_dim (B)
+        self.decoder = nn.Sequential(*decoder_layers)
+
+    def forward(self, x):
+        h = self.latent_layer(self.encoder(x))
+        x_reconstructed = self.decoder(h)
+        return h, x_reconstructed

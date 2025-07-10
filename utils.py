@@ -6,10 +6,13 @@ import scipy.io as sio
 import random
 import dgl
 from collections import Counter
+import torch.nn as nn
 
 import os
 from tqdm import tqdm
 from torch.optim.lr_scheduler import _LRScheduler
+
+from model import CommunityAutoencoder
 
 
 def sparse_to_tuple(sparse_mx, insert_batch=False):
@@ -504,3 +507,82 @@ class PolynomialDecayLR(_LRScheduler):
 
     def _get_closed_form_lr(self):
         assert False
+
+
+def calculate_modularity_matrix(adj):
+    """
+    Calculates the Modularity Matrix B for a given adjacency matrix.
+    B_ij = A_ij - (k_i * k_j) / (2m)
+
+    Args:
+        adj (scipy.sparse.csr_matrix or np.ndarray): The adjacency matrix of the graph.
+                                                     Assumes it's symmetric (undirected graph).
+
+    Returns:
+        torch.Tensor: The Modularity Matrix B, as a dense PyTorch tensor.
+    """
+    if isinstance(adj, np.ndarray):
+        adj_sparse = sp.csr_matrix(adj)
+    elif isinstance(adj, torch.Tensor):
+        adj_sparse = sp.csr_matrix(adj.squeeze(0).cpu().numpy()) # Convert to numpy sparse if needed
+    else:
+        adj_sparse = adj # Assume it's already scipy sparse
+
+    num_nodes = adj_sparse.shape[0]
+    degrees = np.array(adj_sparse.sum(axis=1)).flatten()
+    total_edges_2m = degrees.sum() # Sum of degrees is 2m for undirected graph
+
+    # Outer product k_i * k_j
+    outer_product = np.outer(degrees, degrees)
+
+    # Expected number of edges
+    expected_edges = outer_product / total_edges_2m
+
+    # Modularity Matrix B
+    B_matrix = adj_sparse - sp.csr_matrix(expected_edges)
+
+    return torch.FloatTensor(B_matrix.toarray()) # Convert to dense tensor for autoencoder
+
+
+def train_community_detection_module(adj_original, device, epochs=200, lr=1e-3, hidden_dims=[128, 64], community_embedding_dim=32):
+    """
+    Trains the Community Detection Autoencoder.
+
+    Args:
+        adj_original (scipy.sparse.csr_matrix): The original (non-normalized) adjacency matrix.
+        device (torch.device): Device to run the model on.
+        epochs (int): Number of training epochs.
+        lr (float): Learning rate.
+        hidden_dims (list): List of hidden layer dimensions for autoencoder.
+        community_embedding_dim (int): Dimension of the community embedding H.
+
+    Returns:
+        torch.Tensor: The learned community embeddings H (node_count x community_embedding_dim).
+        CommunityAutoencoder: The trained autoencoder model.
+    """
+    # 1. Calculate Modularity Matrix B
+    B_matrix_tensor = calculate_modularity_matrix(adj_original).to(device)
+    input_dim = B_matrix_tensor.shape[1] # B is N x N, so input_dim is N
+
+    # 2. Initialize Autoencoder
+    community_ae = CommunityAutoencoder(input_dim, hidden_dims, community_embedding_dim).to(device)
+    optimizer = torch.optim.Adam(community_ae.parameters(), lr=lr)
+    criterion = nn.MSELoss() # Reconstruction loss (Lres in ComGA)
+
+    print("Training Community Detection Autoencoder...")
+    for epoch in range(epochs):
+        community_ae.train()
+        optimizer.zero_grad()
+        h_output, b_reconstructed = community_ae(B_matrix_tensor)
+        loss = criterion(b_reconstructed, B_matrix_tensor)
+        loss.backward()
+        optimizer.step()
+
+        if (epoch + 1) % 50 == 0:
+            print(f"  Community AE Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+    community_ae.eval()
+    with torch.no_grad():
+        final_h, _ = community_ae(B_matrix_tensor)
+    print("Community Detection Autoencoder training complete.")
+    return final_h, community_ae
