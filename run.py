@@ -1,7 +1,6 @@
 import torch.nn as nn
 
-from model import Model, GGADFormer
-from model_GT import SGT
+from model import GGADFormer
 from utils import *
 
 from sklearn.metrics import roc_auc_score
@@ -261,8 +260,8 @@ for epoch in pbar:
 
     # Train model
     train_flag = True
-    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss = model(features, processed_seq1, adj,
-                                                            sample_normal_idx, all_normal_idx,
+    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, gui_loss = model(features, processed_seq1, adj,
+                                                            sample_normal_idx, all_normal_idx, community_H,
                                                             train_flag, args)
     # BCE loss
     lbl = torch.unsqueeze(torch.cat(
@@ -304,7 +303,7 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = 0 * loss_margin + 1 * loss_bce + 1 * loss_rec + 1 * con_loss
+    loss = 0 * loss_margin + 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 0.02 * gui_loss
 
     loss.backward()
     optimiser.step()
@@ -329,7 +328,7 @@ for epoch in pbar:
     if epoch % test_gap == 0:
         model.eval()
         train_flag = False
-        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval = model(features, processed_seq1, adj, sample_normal_idx, all_normal_idx,
+        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(features, processed_seq1, adj, sample_normal_idx, all_normal_idx, community_H, 
                                                                 train_flag, args)
         # evaluation on the valid and test node
         logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())

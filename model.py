@@ -106,127 +106,6 @@ class Discriminator(nn.Module):
         return logits
 
 
-class Model(nn.Module):
-    def __init__(self, n_in, n_h, activation, negsamp_round, readout, args):
-        super(Model, self).__init__()
-        self.read_mode = readout
-        self.gcn1 = GCN(n_in, n_h, activation)
-        self.gcn2 = GCN(n_h, n_h, activation)
-        # self.gcn3 = GCN(n_h, n_h, activation)
-        self.fc1 = nn.Linear(n_h, int(n_h / 2), bias=False)
-        self.fc2 = nn.Linear(int(n_h / 2), int(n_h / 4), bias=False)
-        self.fc3 = nn.Linear(int(n_h / 4), 1, bias=False)
-        self.fc4 = nn.Linear(n_h, n_h, bias=False)
-        self.fc6 = nn.Linear(n_h, n_h, bias=False)
-        self.fc5 = nn.Linear(n_h, n_in, bias=False)
-        self.act = nn.ReLU()
-        if readout == 'max':
-            self.read = MaxReadout()
-        elif readout == 'min':
-            self.read = MinReadout()
-        elif readout == 'avg':
-            self.read = AvgReadout()
-        elif readout == 'weighted_sum':
-            self.read = WSReadout()
-
-        self.disc = Discriminator(n_h, negsamp_round)
-        self.SGT = SGT(n_layers=args.n_layers,
-            input_dim=n_in,
-            hidden_dim=args.hidden_dim,
-            n_class=2,
-            num_heads=args.n_heads,
-            ffn_dim=args.ffn_dim,
-            dropout_rate=args.dropout,
-            attention_dropout_rate=args.attention_dropout,
-            args=args)
-        
-
-        # GT only
-        self.GT_pre_MLP = nn.Linear(2 * 745, args.hidden_dim)
-        encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
-                    for _ in range(args.n_layers)]
-        self.layers = nn.ModuleList(encoders)
-        self.final_ln = nn.LayerNorm(args.hidden_dim)
-
-        self.to(args.device)
-
-    def forward(self, seq1, processed_seq1, adj, sample_abnormal_idx, normal_idx, train_flag, args, sparse=False):
-        seq1 = seq1.to(args.device)
-        adj = adj.to(args.device)
-        # 用 GCN 或 SGT
-
-        # GCN：
-        #emb, con_loss = self.gcn2(self.gcn1(seq1, adj, sparse), adj, sparse), torch.tensor([0]).to(args.device)
-
-        # GT only
-        if True:
-            emb = self.GT_pre_MLP(processed_seq1)
-            for i, l in enumerate(self.layers):
-                emb = self.layers[i](emb)
-            # out = torch.split(emb, emb.shape[2] // 2, dim=2)
-            # att_emb, hop_emb = out[0], out[1]
-            # emb = att_emb * args.alpha + hop_emb * (1 - args.alpha)
-            emb = self.final_ln(emb)
-            con_loss = torch.tensor([0]).to(args.device)
-
-        # SGT：
-        # emb, con_loss = self.SGT(processed_feat)
-        # emb = emb.unsqueeze(0).to(args.device)
-        
-        # print("shape of emb: ", emb.shape)
-
-        emb_con = None
-        emb_combine = None
-        emb_abnormal = emb[:, sample_abnormal_idx, :]
-        
-        noise = torch.randn(emb_abnormal.size()) * args.var + args.mean
-        emb_abnormal = emb_abnormal + noise.to(args.device)
-        # emb_abnormal = emb_abnormal + noise.cuda()
-        if train_flag:
-            # Add noise into the attribute of sampled abnormal nodes
-            # degree = torch.sum(raw_adj[0, :, :], 0)[sample_abnormal_idx]
-            # neigh_adj = raw_adj[0, sample_abnormal_idx, :] / torch.unsqueeze(degree, 1)
-
-            neigh_adj = adj[0, sample_abnormal_idx, :]
-            # emb[0, sample_abnormal_idx, :] =self.act(torch.mm(neigh_adj, emb[0, :, :]))
-            # emb[0, sample_abnormal_idx, :] = self.fc4(emb[0, sample_abnormal_idx, :])
-
-            emb_con = torch.mm(neigh_adj, emb[0, :, :])
-            emb_con = self.act(self.fc4(emb_con))
-            # emb_con = self.act(self.fc6(emb_con))
-            emb_combine = torch.cat((emb[:, normal_idx, :], torch.unsqueeze(emb_con, 0)), 1)
-
-            # TODO ablation study add noise on the selected nodes
-
-            # std = 0.01
-            # mean = 0.02
-            # noise = torch.randn(emb[:, sample_abnormal_idx, :].size()) * std + mean
-            # emb_combine = torch.cat((emb[:, normal_idx, :], emb[:, sample_abnormal_idx, :] + noise), 1)
-
-            # TODO ablation study generate outlier from random noise
-            # std = 0.01
-            # mean = 0.02
-            # emb_con = torch.mm(neigh_adj, emb[0, :, :])
-            # noise = torch.randn(emb_con.size()) * std + mean
-            # emb_con = self.act(self.fc4(noise))
-            # emb_combine = torch.cat((emb[:, normal_idx, :], torch.unsqueeze(emb_con, 0)), 1)
-
-            f_1 = self.fc1(emb_combine)
-            f_1 = self.act(f_1)
-            f_2 = self.fc2(f_1)
-            f_2 = self.act(f_2)
-            f_3 = self.fc3(f_2)
-            # f_3 = torch.sigmoid(f_3)
-            emb[:, sample_abnormal_idx, :] = emb_con
-        else:
-            f_1 = self.fc1(emb)
-            f_1 = self.act(f_1)
-            f_2 = self.fc2(f_1)
-            f_2 = self.act(f_2)
-            f_3 = self.fc3(f_2)
-            # f_3 = torch.sigmoid(f_3)
-
-        return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss
 
 class GGADFormer(nn.Module):
     def __init__(self, n_in, n_h, activation, negsamp_round, readout, args):
@@ -280,9 +159,17 @@ class GGADFormer(nn.Module):
             # nn.Tanh()
         )
 
+        # For community embedding
+        self.community_alignment_mlp = nn.Sequential(
+            nn.Linear(args.hidden_dim, args.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(args.hidden_dim, args.community_embedding_dim),
+            nn.ReLU()
+        )
+
         self.to(args.device)
 
-    def forward(self, seq1, processed_seq1, adj, sample_normal_idx, all_normal_idx, train_flag, args, sparse=False):
+    def forward(self, seq1, processed_seq1, adj, sample_normal_idx, all_normal_idx, community_H, train_flag, args, sparse=False):
         """
         Args:
             sample_normal_idx (list): 包含采样节点的索引的 Python 列表。在半监督场景下，模型在训练时只能看到这些节点是被标记为正常的
@@ -314,6 +201,7 @@ class GGADFormer(nn.Module):
         noise = torch.randn(emb_abnormal.size()) * args.var + args.mean
         emb_abnormal = emb_abnormal + noise.to(args.device)
         con_loss = torch.tensor([0]).to(args.device)
+        gui_loss = torch.tensor([0]).to(args.device)
         if train_flag:
             # 采样出的用于生成离群点的正常节点的上下文表示 h_p，[1, len(sample_normal_idx), hidden_dim]
             h_p = emb[:, sample_normal_idx, :]
@@ -365,6 +253,15 @@ class GGADFormer(nn.Module):
 
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
             emb_combine = torch.cat((emb[:, all_normal_idx, :], emb_con), 1)
+
+            # 计算社区引导损失：
+            if community_H is not None:
+                # emb: [1, num_nodes, hidden_dim]
+                # community_H: [1, num_nodes, community_embedding_dim]
+                aligned_emb = self.community_alignment_mlp(emb)
+                gui_loss = F.mse_loss(aligned_emb, community_H.unsqueeze(0)) # MSE Loss
+                # For ablation study, set gui_loss to zero
+                # gui_loss = torch.tensor([0]).to(args.device)
 
 
             f_1 = self.fc1(emb_combine)
@@ -444,7 +341,7 @@ class GGADFormer(nn.Module):
             f_3 = self.fc3(f_2)
             # f_3 = torch.sigmoid(f_3)
 
-        return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss
+        return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss, gui_loss
     
     def calculate_local_perturbation(self, h_p, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
         """

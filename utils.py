@@ -577,10 +577,10 @@ def train_community_detection_module(adj_original, device, epochs=200, lr=1e-3, 
         loss = criterion(b_reconstructed, B_matrix_tensor)
         loss.backward()
         optimizer.step()
-
+        """
         if (epoch + 1) % 50 == 0:
             print(f"  Community AE Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
-
+        """
     community_ae.eval()
     with torch.no_grad():
         final_h, _ = community_ae(B_matrix_tensor)
