@@ -239,7 +239,6 @@ last_auc = 0.0 # 初始化 last_auc，确保在第一次 test_gap 循环时能�
 last_AP = 0.0 # 初始化 last_AP
 
 records = {
-    'loss_margin': [],
     'loss_bce': [],
     'loss_rec': [],
     'con_loss': [],
@@ -273,29 +272,6 @@ for epoch in pbar:
     loss_bce = b_xent(logits, lbl)
     loss_bce = torch.mean(loss_bce)
 
-    # Local affinity margin loss
-    emb = torch.squeeze(emb)
-
-    emb_inf = torch.norm(emb, dim=-1, keepdim=True)
-    emb_inf = torch.pow(emb_inf, -1)
-    emb_inf[torch.isinf(emb_inf)] = 0.
-    emb_norm = emb * emb_inf
-
-    sim_matrix = torch.mm(emb_norm, emb_norm.T)
-    raw_adj = torch.squeeze(raw_adj).to(args.device)
-    similar_matrix = sim_matrix * raw_adj
-
-    r_inv = torch.pow(torch.sum(raw_adj, 0), -1)
-    r_inv[torch.isinf(r_inv)] = 0.
-    affinity = torch.sum(similar_matrix, 0) * r_inv
-
-    affinity_normal_mean = torch.mean(affinity[all_normal_idx])
-    affinity_abnormal_mean = torch.mean(affinity[sample_normal_idx])
-
-    confidence_margin = 0.7
-    # 论文里的 loss ala
-    loss_margin = (confidence_margin - (affinity_normal_mean - affinity_abnormal_mean)).clamp_min(min=0)
-
     diff_attribute = torch.pow(emb_con - emb_abnormal, 2)
     # 论文里的 EC loss
     loss_rec = torch.mean(torch.sqrt(torch.sum(diff_attribute, 1)))
@@ -303,7 +279,7 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = 0 * loss_margin + 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 0.02 * gui_loss
+    loss = 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 0.02 * gui_loss
 
     loss.backward()
     optimiser.step()
@@ -347,7 +323,6 @@ for epoch in pbar:
         'AUC': f'{last_auc.item():.5f}',
         'AP': f'{last_AP.item():.5f}'
     })
-    records['loss_margin'].append(loss_margin.item())
     records['loss_bce'].append(loss_bce.item())
     records['loss_rec'].append(loss_rec.item())
     records['con_loss'].append(con_loss.item()) # SGT 返回的 con_loss
