@@ -19,7 +19,7 @@ import time
 parser = argparse.ArgumentParser(description='')
 
 parser.add_argument('--dataset', type=str,
-                    default='photo')
+                    default='photo', choices=['Amazon', 't_finance', 'reddit', 'photo', 'elliptic'])
 parser.add_argument('--lr', type=float)
 
 parser.add_argument('--seed', type=int, default=0)
@@ -171,6 +171,8 @@ processed_features = processed_features.to(args.device)
 # For GT only
 prop_seq1 = node_neighborhood_feature(adj.squeeze(0), features.squeeze(0), args.pp_k).to(args.device).unsqueeze(0)
 processed_seq1 = torch.concat((features.to(args.device), prop_seq1), dim=2)
+# Disable Matrix Multiplication for ablation study
+# processed_seq1 = features.to(args.device)
 
 optimiser = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 optimizer = torch.optim.AdamW(model.parameters(), lr=args.peak_lr, weight_decay=args.weight_decay)

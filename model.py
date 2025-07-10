@@ -328,7 +328,9 @@ class GGADFormer(nn.Module):
                 h_attn_weighted_mean = torch.bmm(selected_query_attention, emb)
             else:
                 h_attn_weighted_mean = torch.bmm(selected_query_attention, emb)
-
+            
+            # Ablation Study only
+            h_mean = torch.mean(emb, dim=1, keepdim=True).expand_as(h_p)
             # 拼接 h_p 和 h_attn_weighted_mean 作为 GenerateNet 的输入，[1, len(sample_normal_idx), 2 * hidden_dim]
             generate_net_input = torch.cat((h_p, h_attn_weighted_mean), dim=2)
             perturbation = self.generate_net(generate_net_input)
@@ -427,7 +429,7 @@ class GGADFormer(nn.Module):
             L_outlier_separation = torch.mean(torch.logsumexp(logits_outlier_separation, dim=-1))
             # 总的对比损失
             con_loss = 1e-3 * L_normal_alignment + 2e-3 * L_outlier_separation
-            # 设置 con_loss 为零以 debug
+            # 设置 con_loss 为零 for Ablation study
             # con_loss = torch.zeros_like(L_normal_alignment).to(args.device)
 
             # For loss calculation in main function
