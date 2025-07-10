@@ -338,7 +338,6 @@ epochs = range(1, args.num_epoch + 1)
 
 # Plotting loss trends
 plt.subplot(2, 1, 1)  # 2 rows, 1 column, first subplot
-plt.plot(epochs, records['loss_margin'], label='Loss Margin')
 plt.plot(epochs, records['loss_bce'], label='Loss BCE')
 plt.plot(epochs, records['loss_rec'], label='Loss Rec')
 plt.plot(epochs, records['con_loss'], label='Loss SGT')
