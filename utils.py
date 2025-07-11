@@ -539,45 +539,80 @@ def calculate_modularity_matrix(adj):
     return torch.FloatTensor(B_matrix.toarray()) # Convert to dense tensor for autoencoder
 
 
-def train_community_detection_module(adj_original, device, epochs=200, lr=1e-3, hidden_dims=[128, 64], community_embedding_dim=32):
+def train_community_detection_module(
+    adj_original: sp.csr_matrix,
+    device: torch.device,
+    dataset_name: str,
+    pretrain_dir: str = 'pretrain',
+    epochs: int = 200,
+    lr: float = 1e-3,
+    hidden_dims: list = [128, 64],
+    community_embedding_dim: int = 32
+):
     """
-    Trains the Community Detection Autoencoder.
+    Trains the Community Detection Autoencoder or loads a pre-trained one.
+
+    If a pre-trained model for the given dataset_name exists in pretrain_dir,
+    it loads the model. Otherwise, it trains a new model and saves it.
 
     Args:
-        adj_original (scipy.sparse.csr_matrix): The original (non-normalized) adjacency matrix.
+        adj_original (scipy.sparse.csr_matrix): The original adjacency matrix.
         device (torch.device): Device to run the model on.
-        epochs (int): Number of training epochs.
-        lr (float): Learning rate.
+        dataset_name (str): The name of the dataset (e.g., 'Cora', 'CiteSeer').
+                            Used for naming the saved model file.
+        pretrain_dir (str): Directory to save/load the pre-trained models.
+        epochs (int): Number of training epochs if training from scratch.
+        lr (float): Learning rate if training from scratch.
         hidden_dims (list): List of hidden layer dimensions for autoencoder.
         community_embedding_dim (int): Dimension of the community embedding H.
 
     Returns:
-        torch.Tensor: The learned community embeddings H (node_count x community_embedding_dim).
-        CommunityAutoencoder: The trained autoencoder model.
+        torch.Tensor: The learned community embeddings H.
+        CommunityAutoencoder: The trained or loaded autoencoder model.
     """
-    # 1. Calculate Modularity Matrix B
+    # 准备路径并确保文件夹存在
+    os.makedirs(pretrain_dir, exist_ok=True)
+    model_path = os.path.join(pretrain_dir, f'community_ae_{dataset_name}.pth')
+
+    # 计算模块度矩阵 B
     B_matrix_tensor = calculate_modularity_matrix(adj_original).to(device)
-    input_dim = B_matrix_tensor.shape[1] # B is N x N, so input_dim is N
+    input_dim = B_matrix_tensor.shape[1]
 
-    # 2. Initialize Autoencoder
+    # 初始化模型
     community_ae = CommunityAutoencoder(input_dim, hidden_dims, community_embedding_dim).to(device)
-    optimizer = torch.optim.Adam(community_ae.parameters(), lr=lr)
-    criterion = nn.MSELoss() # Reconstruction loss (Lres in ComGA)
 
-    print("Training Community Detection Autoencoder...")
-    for epoch in range(epochs):
-        community_ae.train()
-        optimizer.zero_grad()
-        h_output, b_reconstructed = community_ae(B_matrix_tensor)
-        loss = criterion(b_reconstructed, B_matrix_tensor)
-        loss.backward()
-        optimizer.step()
-        """
-        if (epoch + 1) % 50 == 0:
-            print(f"  Community AE Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
-        """
+    # 检查预训练模型是否存在
+    if os.path.exists(model_path):
+        print(f"Found pre-trained community detection model. Loading from: {model_path}")
+        # map_location=device 确保模型被加载到当前指定的设备上
+        community_ae.load_state_dict(torch.load(model_path, map_location=device))
+        print("Model loaded successfully.")
+    else:
+        # 如果模型不存在，则执行训练
+        print(f"No pre-trained model found for '{dataset_name}'. Training from scratch...")
+        optimizer = torch.optim.Adam(community_ae.parameters(), lr=lr)
+        criterion = nn.MSELoss()
+
+        print("Training Community Detection Autoencoder...")
+        for epoch in range(epochs):
+            community_ae.train()
+            optimizer.zero_grad()
+            h_output, b_reconstructed = community_ae(B_matrix_tensor)
+            loss = criterion(b_reconstructed, B_matrix_tensor)
+            loss.backward()
+            optimizer.step()
+
+        print(f"  Community AE Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+        
+        # 训练完成后，保存模型状态
+        print(f"Saving trained model to: {model_path}")
+        torch.save(community_ae.state_dict(), model_path)
+
+    # 使用加载或新训练好的模型进行最终预测
+    print("Generating final community embeddings...")
     community_ae.eval()
     with torch.no_grad():
         final_h, _ = community_ae(B_matrix_tensor)
-    print("Community Detection Autoencoder training complete.")
+    
+    print("Community detection module is ready.")
     return final_h, community_ae

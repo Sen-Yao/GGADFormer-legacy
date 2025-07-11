@@ -57,7 +57,7 @@ parser.add_argument('--tot_updates', type=int, default=1000,
                         help='used for optimizer learning rate scheduling')
 parser.add_argument('--alpha', type=float, default=1,
                         help='aggregation weight')
-parser.add_argument('--temp', type=float, default=1,
+parser.add_argument('--temp', type=float, default=0.1,
                         help='temperature')
 
 # GGADFormer parameters
@@ -176,6 +176,7 @@ print("Starting Community Detection Module setup...")
 community_H, community_ae_model = train_community_detection_module(
     adj_original=raw_adj,  # Pass your original adj matrix here
     device=args.device,
+    dataset_name=args.dataset,
     epochs=COMMUNITY_AE_EPOCHS,
     lr=COMMUNITY_AE_LR,
     hidden_dims=COMMUNITY_AE_HIDDEN_DIMS,
@@ -279,7 +280,7 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 0.02 * gui_loss
+    loss = 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 1 * gui_loss
 
     loss.backward()
     optimiser.step()

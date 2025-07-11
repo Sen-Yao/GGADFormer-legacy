@@ -72,18 +72,19 @@ class Discriminator(nn.Module):
 class GGADFormer(nn.Module):
     def __init__(self, n_in, n_h, activation, negsamp_round, args):
         super(GGADFormer, self).__init__()
-        self.gcn1 = GCN(n_in, n_h, activation)
-        self.gcn2 = GCN(n_h, n_h, activation)
+        # self.gcn1 = GCN(n_in, n_h, activation)
+        # self.gcn2 = GCN(n_h, n_h, activation)
         # self.gcn3 = GCN(n_h, n_h, activation)
         self.fc1 = nn.Linear(n_h, int(n_h / 2), bias=False)
         self.fc2 = nn.Linear(int(n_h / 2), int(n_h / 4), bias=False)
         self.fc3 = nn.Linear(int(n_h / 4), 1, bias=False)
         self.fc4 = nn.Linear(n_h, n_h, bias=False)
-        self.fc6 = nn.Linear(n_h, n_h, bias=False)
-        self.fc5 = nn.Linear(n_h, n_in, bias=False)
+        # self.fc6 = nn.Linear(n_h, n_h, bias=False)
+        # self.fc5 = nn.Linear(n_h, n_in, bias=False)
         self.act = nn.ReLU()
 
-        self.disc = Discriminator(n_h, negsamp_round)
+        # self.disc = Discriminator(n_h, negsamp_round)
+        """
         self.SGT = SGT(n_layers=args.n_layers,
             input_dim=n_in,
             hidden_dim=args.hidden_dim,
@@ -93,6 +94,7 @@ class GGADFormer(nn.Module):
             dropout_rate=args.dropout,
             attention_dropout_rate=args.attention_dropout,
             args=args)
+        """
         
 
         # GT only

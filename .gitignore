@@ -5,3 +5,4 @@ logs/
 pre_sample/
 results/
 pre_feature*.pt
+pretrain/
