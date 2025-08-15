@@ -110,8 +110,8 @@ class GGADFormer(nn.Module):
             nn.ReLU(),
             nn.Linear(args.hidden_dim, args.hidden_dim),
             nn.ReLU(),
-            nn.Linear(args.hidden_dim, args.hidden_dim)
-            # nn.Tanh()
+            nn.Linear(args.hidden_dim, args.hidden_dim),
+            nn.Tanh()  # 改进2: 添加Tanh约束，限制输出范围在[-1,1]
         )
 
         # For community embedding
