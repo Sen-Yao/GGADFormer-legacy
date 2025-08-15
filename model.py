@@ -264,16 +264,14 @@ class GGADFormer(nn.Module):
             L_normal_alignment = torch.mean(loss_normal_alignment_per_node)
 
             # 构建离群点的负样本集合
-            # sim_outlier_to_cls_single 形状 [1, len(sample_normal_idx), 1]
-            sim_outlier_to_cls_single = torch.sum(emb_con_norm * global_center_norm.expand_as(emb_con_norm), dim=-1, keepdim=True) / args.temp
             # sim_outlier_to_normals 形状 [1, len(sample_normal_idx), len(normal_idx)]
             sim_outlier_to_normals = torch.bmm(emb_con_norm, normal_nodes_emb_norm.transpose(1, 2)) / args.temp
 
-            # 将 h_CLS_norm 和 normal_nodes_emb_norm 作为离群点的负样本集合
-            # logits_outlier_separation 形状 [1, len(sample_normal_idx), 1 + len(normal_idx)]
-            logits_outlier_separation = torch.cat([sim_outlier_to_cls_single, sim_outlier_to_normals], dim=-1)
-
-            L_outlier_separation = torch.mean(torch.logsumexp(logits_outlier_separation, dim=-1))
+            # 为了让离群点不那么“简单”，鼓励离群点与正常点之间的相似度不要太低
+            # 对于每个生成的离群点，找到它与所有正常节点中的最小相似度
+            min_sim_outlier_to_normals = torch.min(sim_outlier_to_normals, dim=-1).values
+            # 使用 hinge loss，只有当最小相似度低于 margin 时才进行惩罚
+            L_outlier_separation = torch.mean(F.relu(args.outlier_margin - min_sim_outlier_to_normals))
             # 总的对比损失
             con_loss = 1e-3 * L_normal_alignment + 2e-3 * L_outlier_separation
             # 设置 con_loss 为零 for Ablation study

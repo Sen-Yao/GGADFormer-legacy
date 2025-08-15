@@ -66,6 +66,8 @@ parser.add_argument('--alpha_outlier_generation', type=float, default=2,
                         help='alpha used in outlier generation')
 parser.add_argument('--topk_neighbors_attention', type=float, default=10,
                         help='topk neighbors attention')
+parser.add_argument('--outlier_margin', type=float, default=0.5,
+                        help='Margin for outlier separation loss')
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
 
 # community parameters
@@ -319,6 +321,8 @@ for epoch in pbar:
             records['best_test_auc'] = last_auc
             records['best_test_AP'] = last_AP
             records['best_test_auc_epoch'] = epoch
+        # Agent 可读的性能输出
+        print(f"Epoch: {epoch:04d}, Test AUC: {last_auc:.5f}, Test AP: {last_AP:.5f}")
     pbar.set_postfix({
         'time': f'{total_time:.2f}s',
         'AUC': f'{last_auc.item():.5f}',
