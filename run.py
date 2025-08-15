@@ -370,3 +370,15 @@ plt.show()
 print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dataset}_loss_and_auc_trends.png')}'")
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
+
+# 保存最佳模型
+best_model_path = f'best_model_{args.dataset}.pth'
+torch.save({
+    'epoch': records['best_test_auc_epoch'],
+    'model_state_dict': model.state_dict(),
+    'optimizer_state_dict': optimiser.state_dict(),
+    'best_auc': records['best_test_auc'],
+    'best_ap': records['best_test_AP'],
+    'args': args
+}, best_model_path)
+print(f"最佳模型已保存到: {best_model_path}")
