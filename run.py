@@ -108,13 +108,6 @@ if args.num_epoch is None:
         args.num_epoch = 500
     elif args.dataset in ['Amazon']:
         args.num_epoch = 800
-if args.dataset in ['reddit', 'photo']:
-    args.mean = 0.02
-    args.var = 0.01
-else:
-    args.mean = 0.0
-    args.var = 0.0
-
 
 print('Dataset: ', args.dataset)
 
@@ -375,7 +368,8 @@ print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dat
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
 
-"""# 保存最佳模型
+"""
+# 保存最佳模型
 best_model_path = f'best_model_{args.dataset}.pth'
 torch.save({
     'epoch': records['best_test_auc_epoch'],
