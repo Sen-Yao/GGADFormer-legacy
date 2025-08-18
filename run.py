@@ -36,8 +36,8 @@ parser.add_argument('--n_layers', type=int, default=3)
 parser.add_argument('--hidden_dim', type=int, default=64)
 parser.add_argument('--n_heads', type=int, default=1)
 parser.add_argument('--ffn_dim', type=int, default=64)
-parser.add_argument('--dropout', type=int, default=0.5)
-parser.add_argument('--attention_dropout', type=int, default=0.5)
+parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--attention_dropout', type=float, default=0.5)
 parser.add_argument('--peak_lr', type=float, default=0.005,
                         help='learning rate')
 parser.add_argument('--end_lr', type=float, default=0.0001,
@@ -64,7 +64,7 @@ parser.add_argument('--temp', type=float, default=0.1,
 
 parser.add_argument('--alpha_outlier_generation', type=float, default=2,
                         help='alpha used in outlier generation')
-parser.add_argument('--topk_neighbors_attention', type=float, default=10,
+parser.add_argument('--topk_neighbors_attention', type=int, default=10,
                         help='topk neighbors attention')
 parser.add_argument('--outlier_margin', type=float, default=0.5,
                         help='Margin for outlier separation loss')
@@ -206,7 +206,6 @@ concated_input_features = torch.concat((concated_input_features, community_H.uns
 
 # 可变学习率
 optimizer = torch.optim.AdamW(model.parameters(), lr=args.peak_lr, weight_decay=args.weight_decay)
-"""
 lr_scheduler = PolynomialDecayLR(
     optimizer,
     warmup_updates=args.warmup_updates,
@@ -215,7 +214,6 @@ lr_scheduler = PolynomialDecayLR(
     end_lr=args.end_lr,
     power=1.0,
 )
-"""
 
 
 #
@@ -293,7 +291,7 @@ for epoch in pbar:
     optimizer.step()
     end_time = time.time()
     total_time += end_time - start_time
-    # lr_scheduler.step()  # 学习率调度器步进放在optimizer.step()之后
+    lr_scheduler.step()  # 学习率调度器步进放在optimizer.step()之后
     
     # if epoch % 2 == 0:
     if False:
@@ -377,7 +375,7 @@ print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dat
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
 
-# 保存最佳模型
+"""# 保存最佳模型
 best_model_path = f'best_model_{args.dataset}.pth'
 torch.save({
     'epoch': records['best_test_auc_epoch'],
@@ -388,3 +386,4 @@ torch.save({
     'args': args
 }, best_model_path)
 print(f"最佳模型已保存到: {best_model_path}")
+"""
