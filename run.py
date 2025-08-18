@@ -22,11 +22,7 @@ parser.add_argument('--dataset', type=str,
 parser.add_argument('--lr', type=float)
 
 parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--embedding_dim', type=int, default=300)
 parser.add_argument('--num_epoch', type=int)
-parser.add_argument('--drop_prob', type=float, default=0.0)
-parser.add_argument('--readout', type=str, default='avg')  # max min avg  weighted_sum
-parser.add_argument('--auc_test_rounds', type=int, default=256)
 parser.add_argument('--negsamp_ratio', type=int, default=1)
 parser.add_argument('--mean', type=float, default=0.0)
 parser.add_argument('--var', type=float, default=0.0)
@@ -179,7 +175,7 @@ community_H, community_ae_model = train_community_detection_module(
 )
 
 # Initialize model and optimizer
-model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args.negsamp_ratio, args)
+model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args)
 processed_features = preprocess_sample_features(args, features.squeeze(0), adj.squeeze(0))
 processed_features = processed_features.to(args.device)
 

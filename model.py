@@ -70,7 +70,7 @@ class Discriminator(nn.Module):
 
 
 class GGADFormer(nn.Module):
-    def __init__(self, n_in, n_h, activation, negsamp_round, args):
+    def __init__(self, n_in, n_h, activation, args):
         super(GGADFormer, self).__init__()
         # self.gcn1 = GCN(n_in, n_h, activation)
         # self.gcn2 = GCN(n_h, n_h, activation)
@@ -83,7 +83,6 @@ class GGADFormer(nn.Module):
         # self.fc5 = nn.Linear(n_h, n_in, bias=False)
         self.act = nn.ReLU()
 
-        # self.disc = Discriminator(n_h, negsamp_round)
         """
         self.SGT = SGT(n_layers=args.n_layers,
             input_dim=n_in,
