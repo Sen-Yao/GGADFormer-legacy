@@ -185,7 +185,7 @@ community_H, community_ae_model = train_community_detection_module(
     community_embedding_dim=args.community_embedding_dim,
 )
 
-# Initialize model and optimiser
+# Initialize model and optimizer
 model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args.negsamp_ratio, args)
 processed_features = preprocess_sample_features(args, features.squeeze(0), adj.squeeze(0))
 processed_features = processed_features.to(args.device)
@@ -201,8 +201,12 @@ concated_input_features = torch.concat((concated_input_features, community_H.uns
 # Disable Matrix Multiplication for ablation study
 # processed_seq1 = features.to(args.device)
 
-optimiser = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+# 固定学习率
+# optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+# 可变学习率
 optimizer = torch.optim.AdamW(model.parameters(), lr=args.peak_lr, weight_decay=args.weight_decay)
+"""
 lr_scheduler = PolynomialDecayLR(
     optimizer,
     warmup_updates=args.warmup_updates,
@@ -211,6 +215,7 @@ lr_scheduler = PolynomialDecayLR(
     end_lr=args.end_lr,
     power=1.0,
 )
+"""
 
 
 #
@@ -258,7 +263,7 @@ test_gap = 5
 for epoch in pbar:
     start_time = time.time()
     model.train()
-    optimiser.zero_grad()
+    optimizer.zero_grad()
 
     # Train model
     train_flag = True
@@ -285,9 +290,10 @@ for epoch in pbar:
     loss = 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 1 * gui_loss
 
     loss.backward()
-    optimiser.step()
+    optimizer.step()
     end_time = time.time()
     total_time += end_time - start_time
+    # lr_scheduler.step()  # 学习率调度器步进放在optimizer.step()之后
     
     # if epoch % 2 == 0:
     if False:
@@ -376,7 +382,7 @@ best_model_path = f'best_model_{args.dataset}.pth'
 torch.save({
     'epoch': records['best_test_auc_epoch'],
     'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimiser.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
     'best_auc': records['best_test_auc'],
     'best_ap': records['best_test_AP'],
     'args': args
