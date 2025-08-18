@@ -372,7 +372,7 @@ print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dat
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
 
 # 保存最佳模型
-best_model_path = f'pretrain/GGADFormer/best_model_{args.dataset}.pth'
+best_model_path = f'best_model_{args.dataset}.pth'
 torch.save({
     'epoch': records['best_test_auc_epoch'],
     'model_state_dict': model.state_dict(),
