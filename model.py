@@ -199,9 +199,9 @@ class GGADFormer(nn.Module):
             # 严格按照原文，直接使用 emb_con_neighbor：
             # emb_con = torch.unsqueeze(emb_con_neighbor, 0)
             # 如果 emb_con 不使用注意力，而是类似原文的生成方式：
-            # emb_con = emb_sampled + alpha * perturbation - 0 * emb_con_neighbor # emb_con 现在是生成的离群点表示
+            # emb_con = emb_sampled + args.perturbation_weight * perturbation - args.neighbor_perturbation_weight * emb_con_neighbor # emb_con 现在是生成的离群点表示
             # 如果使用注意力：
-            emb_con = emb_sampled + 2 * perturbation - 1e-2 * agg_perturbations # emb_con 现在是生成的离群点表示
+            emb_con = emb_sampled + args.perturbation_weight * perturbation - args.local_perturbation_weight * agg_perturbations # emb_con 现在是生成的离群点表示
 
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
             emb_combine = torch.cat((emb[:, all_labeled_normal_idx, :], emb_con), 1)
@@ -272,7 +272,7 @@ class GGADFormer(nn.Module):
             # 使用 hinge loss，只有当最小相似度低于 margin 时才进行惩罚
             L_outlier_separation = torch.mean(F.relu(args.outlier_margin - min_sim_outlier_to_normals))
             # 总的对比损失
-            con_loss = 1e-3 * L_normal_alignment + 2e-3 * L_outlier_separation
+            con_loss = args.normal_alignment_weight * L_normal_alignment + args.outlier_separation_weight * L_outlier_separation
             # 设置 con_loss 为零 for Ablation study
             # con_loss = torch.zeros_like(L_normal_alignment).to(args.device)
 

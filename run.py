@@ -65,6 +65,21 @@ parser.add_argument('--topk_neighbors_attention', type=int, default=10,
                         help='topk neighbors attention')
 parser.add_argument('--outlier_margin', type=float, default=0.5,
                         help='Margin for outlier separation loss')
+
+# Perturbation combination weights
+parser.add_argument('--perturbation_weight', type=float, default=2.0,
+                        help='Weight for main perturbation in outlier generation')
+parser.add_argument('--local_perturbation_weight', type=float, default=1e-2,
+                        help='Weight for local attention-based perturbation')
+parser.add_argument('--neighbor_perturbation_weight', type=float, default=0.0,
+                        help='Weight for neighbor-based perturbation')
+
+# Contrastive learning loss weights
+parser.add_argument('--normal_alignment_weight', type=float, default=1e-3,
+                        help='Weight for normal node alignment loss in contrastive learning')
+parser.add_argument('--outlier_separation_weight', type=float, default=2e-3,
+                        help='Weight for outlier separation loss in contrastive learning')
+
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
 
 # community parameters
