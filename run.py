@@ -2,6 +2,7 @@ import torch.nn as nn
 
 from model import GGADFormer
 from utils import *
+from visualization import load_best_model_and_visualize
 
 from sklearn.metrics import roc_auc_score
 import random
@@ -364,6 +365,26 @@ plt.show()
 print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dataset}_loss_and_auc_trends.png')}'")
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
+
+# 生成离群点并进行可视化分析
+print("\n" + "="*60)
+print("开始进行离群点生成质量可视化分析...")
+print("="*60)
+
+# 调用可视化函数
+load_best_model_and_visualize(
+    args=args,
+    model=model,
+    concated_input_features=concated_input_features,
+    adj=adj,
+    sample_normal_idx=sample_normal_idx,
+    all_labeled_normal_idx=all_labeled_normal_idx,
+    community_H=community_H,
+    ano_label=ano_label,
+    idx_test=idx_test,
+    records=records,
+    save_dir=results_dir
+)
 
 """
 # 保存最佳模型
