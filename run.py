@@ -300,22 +300,23 @@ for epoch in pbar:
     if epoch % test_gap == 0:
         model.eval()
         train_flag = False
-        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, community_H, 
-                                                                train_flag, args)
-        # evaluation on the valid and test node
-        logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
-        last_auc = roc_auc_score(ano_label[idx_test], logits)
-        # print('Testing {} AUC:{:.4f}'.format(args.dataset, auc))
-        last_AP = average_precision_score(ano_label[idx_test], logits, average='macro', pos_label=1, sample_weight=None)
-        # print('Testing AP:', AP)
-        records['test_AUC'].append(last_auc.item())
-        records['test_AP'].append(last_AP.item())
-        if last_auc > records['best_test_auc']:
-            records['best_test_auc'] = last_auc
-            records['best_test_AP'] = last_AP
-            records['best_test_auc_epoch'] = epoch
-        # Agent 可读的性能输出
-        print(f"Epoch: {epoch:04d}, Test AUC: {last_auc:.5f}, Test AP: {last_AP:.5f}")
+        with torch.no_grad():  # 优化：在评估时使用 no_grad 减少显存占用
+            emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, community_H, 
+                                                                    train_flag, args)
+            # evaluation on the valid and test node
+            logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
+            last_auc = roc_auc_score(ano_label[idx_test], logits)
+            # print('Testing {} AUC:{:.4f}'.format(args.dataset, auc))
+            last_AP = average_precision_score(ano_label[idx_test], logits, average='macro', pos_label=1, sample_weight=None)
+            # print('Testing AP:', AP)
+            records['test_AUC'].append(last_auc.item())
+            records['test_AP'].append(last_AP.item())
+            if last_auc > records['best_test_auc']:
+                records['best_test_auc'] = last_auc
+                records['best_test_AP'] = last_AP
+                records['best_test_auc_epoch'] = epoch
+            # Agent 可读的性能输出
+            print(f"Epoch: {epoch:04d}, Test AUC: {last_auc:.5f}, Test AP: {last_AP:.5f}")
     pbar.set_postfix({
         'time': f'{total_time:.2f}s',
         'AUC': f'{last_auc.item():.5f}',
