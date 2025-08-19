@@ -316,6 +316,15 @@ for epoch in pbar:
                 records['best_test_auc'] = last_auc
                 records['best_test_AP'] = last_AP
                 records['best_test_auc_epoch'] = epoch
+                # 保存最佳模型
+                best_model_path = f'best_model_{args.dataset}.pth'
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'best_auc': last_auc,
+                    'best_ap': last_AP
+                }, best_model_path)
+                print(f"新的最佳模型已保存到: {best_model_path} (AUC: {last_auc:.5f})")
             # Agent 可读的性能输出
             print(f"Epoch: {epoch:04d}, Test AUC: {last_auc:.5f}, Test AP: {last_AP:.5f}")
     pbar.set_postfix({
