@@ -572,7 +572,8 @@ def train_community_detection_module(
     """
     # 准备路径并确保文件夹存在
     os.makedirs(pretrain_dir, exist_ok=True)
-    model_path = os.path.join(pretrain_dir, f'community_ae_{dataset_name}.pth')
+    # 在文件名中包含 community_embedding_dim 参数，防止不同维度时读取错误模型
+    model_path = os.path.join(pretrain_dir, f'community_ae_{dataset_name}_dim{community_embedding_dim}.pth')
 
     # 计算模块度矩阵 B
     B_matrix_tensor = calculate_modularity_matrix(adj_original).to(device)
