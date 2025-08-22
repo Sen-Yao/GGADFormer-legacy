@@ -602,8 +602,8 @@ def train_community_detection_module(
             loss = criterion(b_reconstructed, B_matrix_tensor)
             loss.backward()
             optimizer.step()
-
-        print(f"  Community AE Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+            if epoch % 100 == 0:
+                print(f"  Community AE Epoch {epoch}/{epochs}, Loss: {loss.item():.4f}")
         
         # 训练完成后，保存模型状态
         print(f"Saving trained model to: {model_path}")
