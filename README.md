@@ -14,7 +14,15 @@ GGADFormer的主要创新在于：
 
 ## 整体框架
 
-GGADFormer 的整体架构包含以下主要组件：输入图经过特征预处理后，进入社区检测模块学习结构信息，然后通过图Transformer编码器进行特征融合和表示学习，接着由异常生成器创建合成异常样本，最后通过判别器输出异常检测结果。
+GGADFormer 的整体架构包含以下主要组件：
+
+1. 输入图进行特征预处理，得到局部临域特征 prop_features
+2. 输入图邻接矩阵进行社区检测，得到社区特征 comm_features
+3. 将原始节点特征 raw_features，局部临域特征 prop_features 和社区特征 comm_features 通过投影和一个共享的 MLP 得到嵌入 h_raw，h_prop 和 h_comm，拼接后送入 Transformer，Transformer 输出为 emb
+4. 训练数据中的正常节点中的一部分「采样节点」的 emb 将被异常生成器进行扰动，得到一系列被修改后的「人造离群点」
+
+
+然后通过图Transformer编码器进行特征融合和表示学习，接着由异常生成器创建合成异常样本，最后通过判别器输出异常检测结果。
 
 ## 详细组件分析
 
