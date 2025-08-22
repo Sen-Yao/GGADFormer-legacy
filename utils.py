@@ -617,3 +617,51 @@ def train_community_detection_module(
     
     print("Community detection module is ready.")
     return final_h, community_ae
+
+
+def get_dynamic_loss_weights(epoch, warmup_epoch, args):
+    """
+    根据当前epoch和warmup_epoch计算动态损失权重
+    
+    Args:
+        epoch: 当前epoch
+        warmup_epoch: warmup epoch数量
+        args: 参数对象，包含各种损失权重的目标值
+    
+    Returns:
+        dict: 包含各种损失权重的字典
+    """
+    if epoch < warmup_epoch:
+        # warmup阶段：只开启community_loss和正常节点内部的对比损失
+        return {
+            'rec_weight': 0.0,
+            'perturbation_weight': 0.0,
+            'local_perturbation_weight': 0.0,
+            'neighbor_perturbation_weight': 0.0,
+            'normal_alignment_weight': 0.0,
+            'outlier_separation_weight': 0.0,
+            'community_loss_weight': args.community_loss_weight,
+            'pull_weight': args.pull_weight,
+            'push_weight': args.push_weight,
+            'bce_weight': args.bce_weight,
+            'con_weight': args.con_weight,
+            'gui_weight': args.gui_weight
+        }
+    else:
+        # 超过warmup后，使用线性插值平滑地恢复到目标值
+        progress = min(1.0, (epoch - warmup_epoch) / warmup_epoch)  # 在warmup_epoch个epoch内平滑过渡
+        
+        return {
+            'rec_weight': progress * args.rec_weight,
+            'perturbation_weight': progress * args.perturbation_weight,
+            'local_perturbation_weight': progress * args.local_perturbation_weight,
+            'neighbor_perturbation_weight': progress * args.neighbor_perturbation_weight,
+            'normal_alignment_weight': progress * args.normal_alignment_weight,
+            'outlier_separation_weight': progress * args.outlier_separation_weight,
+            'community_loss_weight': args.community_loss_weight,
+            'pull_weight': args.pull_weight,
+            'push_weight': args.push_weight,
+            'bce_weight': args.bce_weight,
+            'con_weight': args.con_weight,
+            'gui_weight': args.gui_weight
+        }

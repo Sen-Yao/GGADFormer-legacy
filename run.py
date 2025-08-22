@@ -100,6 +100,9 @@ parser.add_argument('--device', type=int, default=0, help='Chose the device to r
 parser.add_argument('--community_embedding_dim', type=int, default=32, help='Dimension of the community embedding')
 parser.add_argument('--community_loss_weight', type=float, default=0.1, help='Weight for community reconstruction loss in end-to-end training')
 
+# Warmup parameters
+parser.add_argument('--warmup_epoch', type=int, default=50, help='Number of warmup epochs before enabling anomaly generation losses')
+
 
 args = parser.parse_args()
 if args.device >= 0 and torch.cuda.is_available():
@@ -269,10 +272,12 @@ for epoch in pbar:
     model.train()
     optimizer.zero_grad()
 
+    # 获取当前epoch的动态损失权重
+    dynamic_weights = get_dynamic_loss_weights(epoch, args.warmup_epoch, args)
     # Train model
     train_flag = True
     emb, emb_combine, logits, emb_con, emb_abnormal, con_loss,  community_loss = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx,
-                                                            train_flag, args)
+                                                            train_flag, args, dynamic_weights)
     # BCE loss
     lbl = torch.unsqueeze(torch.cat(
         (torch.zeros(len(all_labeled_normal_idx)), torch.ones(len(emb_con)))),
@@ -285,13 +290,13 @@ for epoch in pbar:
 
     diff_attribute = torch.pow(emb_con - emb_abnormal, 2)
     # 论文里的 EC loss
-    loss_rec = torch.mean(torch.sqrt(torch.sum(diff_attribute, 1)))
+    loss_rec = torch.mean(torch.sqrt(torch.sum(diff_attribute, 1) + 1e-8))
 
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
 
-    loss = args.bce_weight * loss_bce + args.rec_weight * loss_rec + args.con_weight * con_loss + args.community_loss_weight * community_loss
+    loss = dynamic_weights['bce_weight'] * loss_bce + dynamic_weights['rec_weight'] * loss_rec + dynamic_weights['con_weight'] * con_loss + dynamic_weights['community_loss_weight'] * community_loss
 
     loss.backward()
     optimizer.step()
@@ -303,6 +308,9 @@ for epoch in pbar:
     if False:
         logits = np.squeeze(logits.cpu().detach().numpy())
         lbl = np.squeeze(lbl.cpu().detach().numpy())
+        # 处理NaN值
+        if np.isnan(logits).any():
+            logits = np.nan_to_num(logits, nan=0.0)
         auc = roc_auc_score(lbl, logits)
         # print('Traininig {} AUC:{:.4f}'.format(args.dataset, auc))
         # AP = average_precision_score(lbl, logits, average='macro', pos_label=1, sample_weight=None)
@@ -318,9 +326,12 @@ for epoch in pbar:
         model.eval()
         train_flag = False
         with torch.no_grad():  # 优化：在评估时使用 no_grad 减少显存占用
-            emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, community_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, train_flag, args)
+            emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, community_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, train_flag, args, dynamic_weights)
             # evaluation on the valid and test node
             logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
+            # 处理NaN值
+            if np.isnan(logits).any():
+                logits = np.nan_to_num(logits, nan=0.0)
             last_auc = roc_auc_score(ano_label[idx_test], logits)
             # print('Testing {} AUC:{:.4f}'.format(args.dataset, auc))
             last_AP = average_precision_score(ano_label[idx_test], logits, average='macro', pos_label=1, sample_weight=None)

@@ -138,7 +138,7 @@ class GGADFormer(nn.Module):
 
         self.to(args.device)
 
-    def forward(self, concated_input_features, adj, sample_normal_idx, all_labeled_normal_idx,  train_flag, args, sparse=False):
+    def forward(self, concated_input_features, adj, sample_normal_idx, all_labeled_normal_idx,  train_flag, args, dynamic_weights=None, sparse=False):
         """
         Args:
             sample_normal_idx (list): 包含采样节点的索引的 Python 列表。这些节点将在模型中用于生成离群点
@@ -232,10 +232,21 @@ class GGADFormer(nn.Module):
             emb_con_neighbor = self.act(self.fc4(torch.mm(neigh_adj, emb[0, :, :])))
             # 严格按照原文，直接使用 emb_con_neighbor：
             # emb_con = torch.unsqueeze(emb_con_neighbor, 0)
+            # 使用动态权重
+            if dynamic_weights is None:
+                # 如果没有提供动态权重，使用原始参数
+                perturbation_weight = args.perturbation_weight
+                local_perturbation_weight = args.local_perturbation_weight
+                neighbor_perturbation_weight = args.neighbor_perturbation_weight
+            else:
+                perturbation_weight = dynamic_weights['perturbation_weight']
+                local_perturbation_weight = dynamic_weights['local_perturbation_weight']
+                neighbor_perturbation_weight = dynamic_weights['neighbor_perturbation_weight']
+            
             # 如果 emb_con 不使用注意力，而是类似原文的生成方式：
-            # emb_con = emb_sampled + args.perturbation_weight * perturbation - args.neighbor_perturbation_weight * emb_con_neighbor # emb_con 现在是生成的离群点表示
+            # emb_con = emb_sampled + perturbation_weight * perturbation - neighbor_perturbation_weight * emb_con_neighbor # emb_con 现在是生成的离群点表示
             # 如果使用注意力：
-            emb_con = emb_sampled + args.perturbation_weight * perturbation - args.local_perturbation_weight * agg_perturbations # emb_con 现在是生成的离群点表示
+            emb_con = emb_sampled + perturbation_weight * perturbation - local_perturbation_weight * agg_perturbations # emb_con 现在是生成的离群点表示
 
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
             emb_combine = torch.cat((emb[:, all_labeled_normal_idx, :], emb_con), 1)
@@ -283,6 +294,8 @@ class GGADFormer(nn.Module):
             # 对于每一个正常的节点，它与“正常全局中心”的相似度应该远高于它与“所有生成的离群点”的相似度。
             # 对于每个正常节点，我们得到了一个 logits_normal_alignment 向量，其中第一个元素是它作为正例的得分，后面 len(sample_normal_idx) 个元素是它作为负例的得分。
             logits_normal_alignment = torch.cat([sim_normal_to_cls.unsqueeze(-1), sim_normal_to_outliers], dim=-1) # [1, len(normal_idx), 1 + len(sample_normal_idx)]
+            # 添加数值稳定性
+            logits_normal_alignment = torch.clamp(logits_normal_alignment, min=-1e6, max=1e6)
             # 计算了每个正常节点的负对数似然。对于一个正常的节点，它会得到一个关于“与中心相似”的对数概率，以及一组关于“与离群点相似”的对数概率。
             loss_normal_alignment_per_node = -torch.log_softmax(logits_normal_alignment, dim=-1)[:, :, 0]
             # 计算所有正常节点的平均损失。
@@ -339,8 +352,21 @@ class GGADFormer(nn.Module):
                 
                 push_loss = (push_loss_raw + push_loss_prop + push_loss_comm) / 3
                 
+            # 使用动态权重计算对比损失
+            if dynamic_weights is None:
+                # 如果没有提供动态权重，使用原始参数
+                normal_alignment_weight = args.normal_alignment_weight
+                outlier_separation_weight = args.outlier_separation_weight
+                pull_weight = args.pull_weight
+                push_weight = args.push_weight
+            else:
+                normal_alignment_weight = dynamic_weights['normal_alignment_weight']
+                outlier_separation_weight = dynamic_weights['outlier_separation_weight']
+                pull_weight = dynamic_weights['pull_weight']
+                push_weight = dynamic_weights['push_weight']
+            
             # 总的对比损失
-            con_loss = args.normal_alignment_weight * L_normal_alignment + args.outlier_separation_weight * L_outlier_separation + args.pull_weight * pull_loss + args.push_weight * push_loss
+            con_loss = normal_alignment_weight * L_normal_alignment + outlier_separation_weight * L_outlier_separation + pull_weight * pull_loss + push_weight * push_loss
             # 设置 con_loss 为零 for Ablation study
             # con_loss = torch.zeros_like(L_normal_alignment).to(args.device)
 
