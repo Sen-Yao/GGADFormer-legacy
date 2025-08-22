@@ -97,7 +97,8 @@ class GGADFormer(nn.Module):
         
 
         # GT only
-        self.token_projection = nn.Linear(2 * n_in + args.community_embedding_dim, args.hidden_dim)
+        proj_dim = args.hidden_dim // 4
+        self.token_projection = nn.Linear(3 * proj_dim, args.hidden_dim)
         encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
                     for _ in range(args.n_layers)]
         self.layers = nn.ModuleList(encoders)
@@ -109,8 +110,8 @@ class GGADFormer(nn.Module):
             nn.ReLU(),
             nn.Linear(args.hidden_dim, args.hidden_dim),
             nn.ReLU(),
-            nn.Linear(args.hidden_dim, args.hidden_dim)
-            # nn.Tanh()
+            nn.Linear(args.hidden_dim, args.hidden_dim),
+            nn.Tanh()
         )
 
         # For community embedding
@@ -119,6 +120,19 @@ class GGADFormer(nn.Module):
             nn.ReLU(),
             nn.Linear(args.hidden_dim, args.community_embedding_dim),
             nn.ReLU()
+        )
+
+        # 添加投影层和共享MLP
+        self.n_in = n_in
+        self.comm_dim = args.community_embedding_dim
+        
+        self.proj_raw = nn.Linear(self.n_in, proj_dim)
+        self.proj_prop = nn.Linear(self.n_in, proj_dim)
+        self.proj_comm = nn.Linear(self.comm_dim, proj_dim)
+        self.shared_mlp = nn.Sequential(
+            nn.Linear(proj_dim, proj_dim),
+            nn.ReLU(),
+            nn.Linear(proj_dim, proj_dim)
         )
 
         self.to(args.device)
@@ -130,8 +144,21 @@ class GGADFormer(nn.Module):
             all_labeled_normal_idx (list): 包含所有标记节点的索引的 Python 列表。在半监督场景下，模型在训练时只能看到这些节点是被标记为正常的
         """
 
+        # 拆分输入特征
+        raw_features = concated_input_features[:, :, :self.n_in]
+        prop_features = concated_input_features[:, :, self.n_in:2*self.n_in]
+        comm_features = concated_input_features[:, :, 2*self.n_in:]
+
+        # 通过投影和共享MLP得到嵌入
+        h_raw = self.shared_mlp(self.proj_raw(raw_features))
+        h_prop = self.shared_mlp(self.proj_prop(prop_features))
+        h_comm = self.shared_mlp(self.proj_comm(comm_features))
+
+        # 将三个嵌入拼接后送入transformer
+        combined_features = torch.cat([h_raw, h_prop, h_comm], dim=-1)
+        
         attention_weights = None # 初始化注意力权重
-        emb = self.token_projection(concated_input_features)
+        emb = self.token_projection(combined_features)
         for i, l in enumerate(self.layers):
             emb, current_attention_weights = self.layers[i](emb)
             if i == len(self.layers) - 1: # 拿到最后一层的注意力
@@ -191,10 +218,8 @@ class GGADFormer(nn.Module):
                 agg_perturbations = torch.zeros_like(emb_sampled) # 如果没有注意力，局部扰动为0
 
             
-            alpha = args.alpha_outlier_generation
             neigh_adj = adj[0, sample_normal_idx, :]
-            # emb_con: [1, len(sample_normal_idx), hidden_dim]
-            # 以下为原本的直接通过邻居节点通过 MLP 生成，现已改为通过 perturbation 生成离群点表示
+            # emb_con_neighbor: [len(sample_normal_idx), hidden_dim]
             emb_con_neighbor = self.act(self.fc4(torch.mm(neigh_adj, emb[0, :, :])))
             # 严格按照原文，直接使用 emb_con_neighbor：
             # emb_con = torch.unsqueeze(emb_con_neighbor, 0)
@@ -271,8 +296,50 @@ class GGADFormer(nn.Module):
             min_sim_outlier_to_normals = torch.min(sim_outlier_to_normals, dim=-1).values
             # 使用 hinge loss，只有当最小相似度低于 margin 时才进行惩罚
             L_outlier_separation = torch.mean(F.relu(args.outlier_margin - min_sim_outlier_to_normals))
+            
+            # 添加新的对比学习损失项
+            if len(all_labeled_normal_idx) > 0:
+                h_raw_normal = h_raw[:, all_labeled_normal_idx, :]
+                h_prop_normal = h_prop[:, all_labeled_normal_idx, :]
+                h_comm_normal = h_comm[:, all_labeled_normal_idx, :]
+
+                cos1 = F.cosine_similarity(h_raw_normal, h_prop_normal, dim=-1).mean()
+                cos2 = F.cosine_similarity(h_raw_normal, h_comm_normal, dim=-1).mean()
+                cos3 = F.cosine_similarity(h_prop_normal, h_comm_normal, dim=-1).mean()
+
+                pull_loss = - (cos1 + cos2 + cos3) / 3
+                
+                # 添加第四项对比学习损失：推开不同节点的相同视图
+                # 计算所有节点（包括正常节点和生成的异常点）的嵌入
+                all_nodes_idx = list(all_labeled_normal_idx) + sample_normal_idx
+                h_raw_all = h_raw[:, all_nodes_idx, :]
+                h_prop_all = h_prop[:, all_nodes_idx, :]
+                h_comm_all = h_comm[:, all_nodes_idx, :]
+                
+                # 计算不同节点之间的相似度矩阵
+                # 归一化嵌入
+                h_raw_all_norm = F.normalize(h_raw_all, p=2, dim=-1)
+                h_prop_all_norm = F.normalize(h_prop_all, p=2, dim=-1)
+                h_comm_all_norm = F.normalize(h_comm_all, p=2, dim=-1)
+                
+                # 计算相似度矩阵 [1, num_nodes, num_nodes]
+                sim_raw = torch.bmm(h_raw_all_norm, h_raw_all_norm.transpose(1, 2)) / args.temp
+                sim_prop = torch.bmm(h_prop_all_norm, h_prop_all_norm.transpose(1, 2)) / args.temp
+                sim_comm = torch.bmm(h_comm_all_norm, h_comm_all_norm.transpose(1, 2)) / args.temp
+                
+                # 创建mask，排除对角线元素（自己与自己的相似度）
+                batch_size, num_nodes = sim_raw.shape[0], sim_raw.shape[1]
+                mask = torch.eye(num_nodes, device=sim_raw.device).unsqueeze(0).bool()
+                
+                # 计算推开损失：最小化不同节点之间的相似度
+                push_loss_raw = torch.mean(sim_raw[~mask])
+                push_loss_prop = torch.mean(sim_prop[~mask])
+                push_loss_comm = torch.mean(sim_comm[~mask])
+                
+                push_loss = (push_loss_raw + push_loss_prop + push_loss_comm) / 3
+                
             # 总的对比损失
-            con_loss = args.normal_alignment_weight * L_normal_alignment + args.outlier_separation_weight * L_outlier_separation
+            con_loss = args.normal_alignment_weight * L_normal_alignment + args.outlier_separation_weight * L_outlier_separation + args.pull_weight * pull_loss + args.push_weight * push_loss
             # 设置 con_loss 为零 for Ablation study
             # con_loss = torch.zeros_like(L_normal_alignment).to(args.device)
 

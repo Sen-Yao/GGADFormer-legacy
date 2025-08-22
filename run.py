@@ -79,6 +79,20 @@ parser.add_argument('--normal_alignment_weight', type=float, default=1e-3,
                         help='Weight for normal node alignment loss in contrastive learning')
 parser.add_argument('--outlier_separation_weight', type=float, default=2e-3,
                         help='Weight for outlier separation loss in contrastive learning')
+parser.add_argument('--push_weight', type=float, default=1e-3,
+                        help='Weight for pushing different nodes apart in contrastive learning')
+parser.add_argument('--pull_weight', type=float, default=1.0,
+                        help='Weight for pulling same node different views together in contrastive learning')
+
+# Main loss weights
+parser.add_argument('--bce_weight', type=float, default=1.0,
+                        help='Weight for binary cross entropy loss')
+parser.add_argument('--rec_weight', type=float, default=1.0,
+                        help='Weight for reconstruction loss')
+parser.add_argument('--con_weight', type=float, default=1.0,
+                        help='Weight for contrastive learning loss')
+parser.add_argument('--gui_weight', type=float, default=1.0,
+                        help='Weight for community guidance loss')
 
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
 
@@ -290,7 +304,7 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = 1 * loss_bce + 1 * loss_rec + 1 * con_loss + 1 * gui_loss
+    loss = args.bce_weight * loss_bce + args.rec_weight * loss_rec + args.con_weight * con_loss + args.gui_weight * gui_loss
 
     loss.backward()
     optimizer.step()
