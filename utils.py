@@ -643,7 +643,7 @@ def get_dynamic_loss_weights(epoch, warmup_epoch, args):
             'community_loss_weight': args.community_loss_weight,
             'pull_weight': args.pull_weight,
             'push_weight': args.push_weight,
-            'bce_weight': args.bce_weight,
+            'bce_weight': 0.0,
             'con_weight': args.con_weight,
             'gui_weight': args.gui_weight
         }
