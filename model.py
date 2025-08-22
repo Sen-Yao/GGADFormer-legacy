@@ -114,13 +114,7 @@ class GGADFormer(nn.Module):
             nn.Tanh()
         )
 
-        # For community embedding
-        self.community_alignment_mlp = nn.Sequential(
-            nn.Linear(args.hidden_dim, args.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(args.hidden_dim, args.community_embedding_dim),
-            nn.ReLU()
-        )
+
 
         # 添加投影层和共享MLP
         self.n_in = n_in
@@ -135,9 +129,16 @@ class GGADFormer(nn.Module):
             nn.Linear(proj_dim, proj_dim)
         )
 
+        # 集成社区自编码器到主模型中
+        self.community_autoencoder = CommunityAutoencoder(
+            input_dim=n_in,  # 使用节点特征维度作为输入
+            hidden_dims=[128, 64],
+            output_dim=args.community_embedding_dim
+        )
+
         self.to(args.device)
 
-    def forward(self, concated_input_features, adj, sample_normal_idx, all_labeled_normal_idx, community_H, train_flag, args, sparse=False):
+    def forward(self, concated_input_features, adj, sample_normal_idx, all_labeled_normal_idx,  train_flag, args, sparse=False):
         """
         Args:
             sample_normal_idx (list): 包含采样节点的索引的 Python 列表。这些节点将在模型中用于生成离群点
@@ -147,7 +148,15 @@ class GGADFormer(nn.Module):
         # 拆分输入特征
         raw_features = concated_input_features[:, :, :self.n_in]
         prop_features = concated_input_features[:, :, self.n_in:2*self.n_in]
-        comm_features = concated_input_features[:, :, 2*self.n_in:]
+        
+        # 端到端联合训练：动态生成社区嵌入
+        # 使用原始特征作为社区自编码器的输入
+        raw_features_flat = raw_features.squeeze(0)  # [num_nodes, n_in]
+        comm_features, b_reconstructed = self.community_autoencoder(raw_features_flat)
+        comm_features = comm_features.unsqueeze(0)  # [1, num_nodes, community_embedding_dim]
+        
+        # 计算社区重构损失
+        community_loss = F.mse_loss(b_reconstructed, raw_features_flat)
 
         # 通过投影和共享MLP得到嵌入
         h_raw = self.shared_mlp(self.proj_raw(raw_features))
@@ -231,14 +240,6 @@ class GGADFormer(nn.Module):
             # 构建 emb_combine, [1, num_normal_nodes + len(sample_normal_idx), hidden_dim]
             emb_combine = torch.cat((emb[:, all_labeled_normal_idx, :], emb_con), 1)
 
-            # 计算社区引导损失：
-            if community_H is not None:
-                # emb: [1, num_nodes, hidden_dim]
-                # community_H: [1, num_nodes, community_embedding_dim]
-                aligned_emb = self.community_alignment_mlp(emb)
-                gui_loss = F.mse_loss(aligned_emb, community_H.unsqueeze(0)) # MSE Loss
-                # For ablation study, set gui_loss to zero
-                # gui_loss = torch.tensor([0]).to(args.device)
 
 
             f_1 = self.fc1(emb_combine)
@@ -356,7 +357,7 @@ class GGADFormer(nn.Module):
             f_3 = self.fc3(f_2)
             # f_3 = torch.sigmoid(f_3)
 
-        return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss, gui_loss
+        return emb, emb_combine, f_3, emb_con, emb_abnormal, con_loss, community_loss
     
     def calculate_local_perturbation(self, emb_sampled, full_embeddings, agg_attention_weights, sample_normal_idx, adj, args):
         """

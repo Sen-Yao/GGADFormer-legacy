@@ -98,6 +98,7 @@ parser.add_argument('--device', type=int, default=0, help='Chose the device to r
 
 # community parameters
 parser.add_argument('--community_embedding_dim', type=int, default=32, help='Dimension of the community embedding')
+parser.add_argument('--community_loss_weight', type=float, default=0.1, help='Weight for community reconstruction loss in end-to-end training')
 
 
 args = parser.parse_args()
@@ -190,19 +191,7 @@ labels = torch.FloatTensor(labels[np.newaxis])
 
 # Community Training
 
-COMMUNITY_AE_EPOCHS = 1000
-COMMUNITY_AE_LR = 1e-3
-COMMUNITY_AE_HIDDEN_DIMS = [128, 64] # Example: Two hidden layers for autoencoder
-print("Starting Community Detection Module setup...")
-community_H, community_ae_model = train_community_detection_module(
-    adj_original=raw_adj,  # Pass your original adj matrix here
-    device=args.device,
-    dataset_name=args.dataset,
-    epochs=COMMUNITY_AE_EPOCHS,
-    lr=COMMUNITY_AE_LR,
-    hidden_dims=COMMUNITY_AE_HIDDEN_DIMS,
-    community_embedding_dim=args.community_embedding_dim,
-)
+
 
 # Initialize model and optimizer
 model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args)
@@ -213,9 +202,6 @@ processed_features = processed_features.to(args.device)
 # Only use the 0-hop and the last hop features
 prop_seq1 = node_neighborhood_feature(adj.squeeze(0), features.squeeze(0), args.pp_k).to(args.device).unsqueeze(0)
 concated_input_features = torch.concat((features.to(args.device), prop_seq1), dim=2)
-# Add community embedding to the processed features
-community_H_reshaped = community_H.unsqueeze(0) # -> (1, num_nodes, community_embedding_dim)
-concated_input_features = torch.concat((concated_input_features, community_H.unsqueeze(0)), dim=2)
 
 # Disable Matrix Multiplication for ablation study
 # processed_seq1 = features.to(args.device)
@@ -267,6 +253,7 @@ records = {
     'loss_bce': [],
     'loss_rec': [],
     'con_loss': [],
+    'community_loss': [],
     'total_loss': [],
     'test_AUC': [],
     'test_AP': [],
@@ -284,8 +271,7 @@ for epoch in pbar:
 
     # Train model
     train_flag = True
-    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, gui_loss = model(concated_input_features, adj.to(args.device),
-                                                            sample_normal_idx, all_labeled_normal_idx, community_H,
+    emb, emb_combine, logits, emb_con, emb_abnormal, con_loss,  community_loss = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx,
                                                             train_flag, args)
     # BCE loss
     lbl = torch.unsqueeze(torch.cat(
@@ -304,7 +290,8 @@ for epoch in pbar:
     # For ablation study, set con_loss to zero
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
-    loss = args.bce_weight * loss_bce + args.rec_weight * loss_rec + args.con_weight * con_loss + args.gui_weight * gui_loss
+
+    loss = args.bce_weight * loss_bce + args.rec_weight * loss_rec + args.con_weight * con_loss + args.community_loss_weight * community_loss
 
     loss.backward()
     optimizer.step()
@@ -331,8 +318,7 @@ for epoch in pbar:
         model.eval()
         train_flag = False
         with torch.no_grad():  # 优化：在评估时使用 no_grad 减少显存占用
-            emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, gui_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, community_H, 
-                                                                    train_flag, args)
+            emb, emb_combine, logits, emb_con, emb_abnormal, con_loss_eval, community_loss_eval = model(concated_input_features, adj.to(args.device), sample_normal_idx, all_labeled_normal_idx, train_flag, args)
             # evaluation on the valid and test node
             logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
             last_auc = roc_auc_score(ano_label[idx_test], logits)
@@ -351,7 +337,8 @@ for epoch in pbar:
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'best_auc': last_auc,
-                    'best_ap': last_AP
+                    'best_ap': last_AP,
+                    'community_autoencoder_state_dict': model.community_autoencoder.state_dict()
                 }, best_model_path)
                 print(f"新的最佳模型已保存到: {best_model_path} (AUC: {last_auc:.5f})")
             # Agent 可读的性能输出
@@ -364,6 +351,7 @@ for epoch in pbar:
     records['loss_bce'].append(loss_bce.item())
     records['loss_rec'].append(loss_rec.item())
     records['con_loss'].append(con_loss.item()) # SGT 返回的 con_loss
+    records['community_loss'].append(community_loss.item()) 
     records['total_loss'].append(loss.item())
 
 
@@ -379,6 +367,7 @@ plt.subplot(2, 1, 1)  # 2 rows, 1 column, first subplot
 plt.plot(epochs, records['loss_bce'], label='Loss BCE')
 plt.plot(epochs, records['loss_rec'], label='Loss Rec')
 plt.plot(epochs, records['con_loss'], label='Loss SGT')
+plt.plot(epochs, records['community_loss'], label='Loss Community', linestyle='--')
 plt.plot(epochs, records['total_loss'], label='Total Loss', linewidth=2, linestyle='--')
 plt.xlabel('Epoch')
 plt.ylabel('Loss Value')
@@ -403,7 +392,7 @@ plt.show()
 print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dataset}_loss_and_auc_trends.png')}'")
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
-
+"""
 # 生成离群点并进行可视化分析
 print("\n" + "="*60)
 print("开始进行离群点生成质量可视化分析...")
@@ -424,7 +413,7 @@ load_best_model_and_visualize(
     save_dir=results_dir
 )
 
-"""
+
 # 保存最佳模型
 best_model_path = f'best_model_{args.dataset}.pth'
 torch.save({

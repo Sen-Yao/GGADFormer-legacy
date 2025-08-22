@@ -36,7 +36,7 @@ def visualize_outlier_generation_quality(model, concated_input_features, adj, sa
     with torch.no_grad():
         # Get embeddings and generated outliers in training mode to access emb_combine
         train_flag = True
-        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, gui_loss = model(
+        emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, community_loss = model(
             concated_input_features, adj.to(args.device), sample_normal_idx, 
             all_labeled_normal_idx, community_H, train_flag, args
         )
