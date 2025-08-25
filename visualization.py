@@ -425,22 +425,28 @@ def load_best_model_and_visualize(args, model, concated_input_features, adj, sam
     best_model_path = f'best_model_{args.dataset}.pth'
     if os.path.exists(best_model_path):
         print(f"Loading best model from: {best_model_path}")
-        checkpoint = torch.load(best_model_path, map_location=args.device)
-        
-        # 加载主模型状态字典
-        model.load_state_dict(checkpoint['model_state_dict'])
-        
-        # 加载社区自编码器状态字典（如果存在）
-        if 'community_autoencoder_state_dict' in checkpoint:
-            model.community_autoencoder.load_state_dict(checkpoint['community_autoencoder_state_dict'])
-            print("Successfully loaded community autoencoder state dict")
-        
-        # 确保模型在正确的设备上
-        model = model.to(args.device)
-        
-        print(f"Successfully loaded best model from epoch {checkpoint['epoch']}")
-        print(f"Model AUC: {checkpoint['best_auc']:.5f}, AP: {checkpoint['best_ap']:.5f}")
-        print(f"Model loaded on device: {args.device}")
+        try:
+            checkpoint = torch.load(best_model_path, map_location=args.device)
+            
+            # 加载主模型状态字典
+            model.load_state_dict(checkpoint['model_state_dict'])
+            
+            # 加载社区自编码器状态字典（如果存在）
+            if 'community_autoencoder_state_dict' in checkpoint:
+                model.community_autoencoder.load_state_dict(checkpoint['community_autoencoder_state_dict'])
+                print("Successfully loaded community autoencoder state dict")
+            
+            # 确保模型在正确的设备上
+            model = model.to(args.device)
+            
+            print(f"Successfully loaded best model from epoch {checkpoint['epoch']}")
+            print(f"Model AUC: {checkpoint['best_auc']:.5f}, AP: {checkpoint['best_ap']:.5f}")
+            print(f"Model loaded on device: {args.device}")
+            
+        except Exception as e:
+            print(f"Warning: Failed to load best model due to version compatibility or other issues: {str(e)}")
+            print("Using current model state for visualization.")
+            print("Note: This might affect visualization quality if the current model is not the best performing one.")
     else:
         print(f"Warning: Best model file {best_model_path} not found. Using current model state.")
     
