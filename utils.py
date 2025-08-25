@@ -504,18 +504,38 @@ class PolynomialDecayLR(_LRScheduler):
         assert False
 
 
-def calculate_modularity_matrix(adj):
+def calculate_modularity_matrix(adj, dataset_name: str = None):
     """
-    Calculates the Modularity Matrix B for a given adjacency matrix.
+    Calculates the Modularity Matrix B for a given adjacency matrix, with caching mechanism.
     B_ij = A_ij - (k_i * k_j) / (2m)
 
     Args:
         adj (scipy.sparse.csr_matrix or np.ndarray): The adjacency matrix of the graph.
                                                      Assumes it's symmetric (undirected graph).
+        dataset_name (str, optional): The name of the dataset. If provided,
+                                      the function will check for a cached modularity matrix
+                                      and save it after calculation. Defaults to None.
 
     Returns:
         torch.Tensor: The Modularity Matrix B, as a dense PyTorch tensor.
     """
+    if dataset_name:
+        cache_dir = "./dataset/modularity_cache"
+        os.makedirs(cache_dir, exist_ok=True)  # Ensure cache directory exists
+        cache_path = os.path.join(cache_dir, f"{dataset_name}_modularity_matrix.pt")
+
+        if os.path.exists(cache_path):
+            print(f"Loading modularity matrix for '{dataset_name}' from cache...")
+            try:
+                B_matrix_tensor = torch.load(cache_path)
+                print(f"Modularity matrix loaded successfully from {cache_path}")
+                return B_matrix_tensor
+            except Exception as e:
+                print(f"Error loading from cache: {e}. Re-calculating...")
+
+    # If no dataset_name or cache not found/corrupted, perform calculation
+    print(f"Calculating modularity matrix for '{dataset_name if dataset_name else 'unnamed'}'...")
+    
     if isinstance(adj, np.ndarray):
         adj_sparse = sp.csr_matrix(adj)
     elif isinstance(adj, torch.Tensor):
@@ -535,8 +555,16 @@ def calculate_modularity_matrix(adj):
 
     # Modularity Matrix B
     B_matrix = adj_sparse - sp.csr_matrix(expected_edges)
+    B_matrix_tensor = torch.FloatTensor(B_matrix.toarray()) # Convert to dense tensor for autoencoder
 
-    return torch.FloatTensor(B_matrix.toarray()) # Convert to dense tensor for autoencoder
+    if dataset_name:
+        try:
+            torch.save(B_matrix_tensor, cache_path)
+            print(f"Modularity matrix for '{dataset_name}' saved to cache at {cache_path}.")
+        except Exception as e:
+            print(f"Warning: Could not save modularity matrix to cache: {e}")
+
+    return B_matrix_tensor
 
 
 def train_community_detection_module(
@@ -575,7 +603,7 @@ def train_community_detection_module(
     model_path = os.path.join(pretrain_dir, f'community_ae_{dataset_name}.pth')
 
     # 计算模块度矩阵 B
-    B_matrix_tensor = calculate_modularity_matrix(adj_original).to(device)
+    B_matrix_tensor = calculate_modularity_matrix(adj_original, dataset_name).to(device)
     input_dim = B_matrix_tensor.shape[1]
 
     # 初始化模型
