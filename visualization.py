@@ -11,7 +11,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def visualize_outlier_generation_quality(model, concated_input_features, adj, sample_normal_idx, 
-                                       all_labeled_normal_idx, community_H, ano_label, idx_test, 
+                                       all_labeled_normal_idx, ano_label, idx_test, 
                                        args, save_dir='results'):
     """
     Visualize the quality of generated outliers compared to real anomalies in embedding space.
@@ -38,7 +38,7 @@ def visualize_outlier_generation_quality(model, concated_input_features, adj, sa
         train_flag = True
         emb, emb_combine, logits, emb_con, emb_abnormal, con_loss, community_loss = model(
             concated_input_features, adj.to(args.device), sample_normal_idx, 
-            all_labeled_normal_idx, community_H, train_flag, args
+            all_labeled_normal_idx, train_flag, args
         )
         
         # Use emb_combine for visualization instead of emb
@@ -55,7 +55,7 @@ def visualize_outlier_generation_quality(model, concated_input_features, adj, sa
         train_flag = False
         emb_orig, _, _, _, _, _, _ = model(
             concated_input_features, adj.to(args.device), sample_normal_idx, 
-            all_labeled_normal_idx, community_H, train_flag, args
+            all_labeled_normal_idx, train_flag, args
         )
         all_embeddings_orig = emb_orig.squeeze(0).cpu().numpy()
         
@@ -397,7 +397,7 @@ def analyze_embedding_quality(normal_embeddings, real_anomaly_embeddings,
 
 
 def load_best_model_and_visualize(args, model, concated_input_features, adj, sample_normal_idx, 
-                                 all_labeled_normal_idx, community_H, ano_label, idx_test, 
+                                 all_labeled_normal_idx, ano_label, idx_test, 
                                  records, save_dir='results'):
     """
     Load the best performing model from training records and create visualizations.
@@ -426,16 +426,28 @@ def load_best_model_and_visualize(args, model, concated_input_features, adj, sam
     if os.path.exists(best_model_path):
         print(f"Loading best model from: {best_model_path}")
         checkpoint = torch.load(best_model_path, map_location=args.device)
+        
+        # 加载主模型状态字典
         model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # 加载社区自编码器状态字典（如果存在）
+        if 'community_autoencoder_state_dict' in checkpoint:
+            model.community_autoencoder.load_state_dict(checkpoint['community_autoencoder_state_dict'])
+            print("Successfully loaded community autoencoder state dict")
+        
+        # 确保模型在正确的设备上
+        model = model.to(args.device)
+        
         print(f"Successfully loaded best model from epoch {checkpoint['epoch']}")
         print(f"Model AUC: {checkpoint['best_auc']:.5f}, AP: {checkpoint['best_ap']:.5f}")
+        print(f"Model loaded on device: {args.device}")
     else:
         print(f"Warning: Best model file {best_model_path} not found. Using current model state.")
     
     # Create visualization
     visualize_outlier_generation_quality(
         model, concated_input_features, adj, sample_normal_idx,
-        all_labeled_normal_idx, community_H, ano_label, idx_test,
+        all_labeled_normal_idx, ano_label, idx_test,
         args, save_dir
     )
     

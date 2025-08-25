@@ -643,9 +643,11 @@ def get_dynamic_loss_weights(epoch, warmup_epoch, args):
             'community_loss_weight': args.community_loss_weight,
             'pull_weight': args.pull_weight,
             'push_weight': args.push_weight,
+            # 'pull_weight': args.pull_weight,
+            # 'push_weight': args.push_weight,
             'bce_weight': 0.0,
-            'con_weight': args.con_weight,
-            'gui_weight': args.gui_weight
+            # 'bce_weight': args.bce_weight,
+            'con_weight': args.con_weight
         }
     else:
         # 超过warmup后，使用线性插值平滑地恢复到目标值
@@ -661,7 +663,6 @@ def get_dynamic_loss_weights(epoch, warmup_epoch, args):
             'community_loss_weight': args.community_loss_weight,
             'pull_weight': args.pull_weight,
             'push_weight': args.push_weight,
-            'bce_weight': args.bce_weight,
-            'con_weight': args.con_weight,
-            'gui_weight': args.gui_weight
+            'bce_weight': progress * args.bce_weight,
+            'con_weight': args.con_weight
         }

@@ -91,14 +91,13 @@ parser.add_argument('--rec_weight', type=float, default=1.0,
                         help='Weight for reconstruction loss')
 parser.add_argument('--con_weight', type=float, default=1.0,
                         help='Weight for contrastive learning loss')
-parser.add_argument('--gui_weight', type=float, default=1.0,
-                        help='Weight for community guidance loss')
+parser.add_argument('--community_loss_weight', type=float, default=0.1, help='Weight for community reconstruction loss in end-to-end training')
+
 
 parser.add_argument('--device', type=int, default=0, help='Chose the device to run the model on')
 
 # community parameters
 parser.add_argument('--community_embedding_dim', type=int, default=32, help='Dimension of the community embedding')
-parser.add_argument('--community_loss_weight', type=float, default=0.1, help='Weight for community reconstruction loss in end-to-end training')
 
 # Warmup parameters
 parser.add_argument('--warmup_epoch', type=int, default=50, help='Number of warmup epochs before enabling anomaly generation losses')
@@ -198,6 +197,7 @@ labels = torch.FloatTensor(labels[np.newaxis])
 
 # Initialize model and optimizer
 model = GGADFormer(ft_size, args.hidden_dim, 'prelu', args)
+model = model.to(args.device)  # 确保模型在正确的设备上
 processed_features = preprocess_sample_features(args, features.squeeze(0), adj.squeeze(0))
 processed_features = processed_features.to(args.device)
 
@@ -299,6 +299,7 @@ for epoch in pbar:
     loss = dynamic_weights['bce_weight'] * loss_bce + dynamic_weights['rec_weight'] * loss_rec + dynamic_weights['con_weight'] * con_loss + dynamic_weights['community_loss_weight'] * community_loss
 
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
     end_time = time.time()
     total_time += end_time - start_time
@@ -403,7 +404,7 @@ plt.show()
 print(f"Loss and AUC trend plot saved to '{os.path.join(results_dir, f'{args.dataset}_loss_and_auc_trends.png')}'")
 
 print(f"Best Test AUC: {records['best_test_auc']:.5f}, AP: {records['best_test_AP']:.5f} at Epoch: {records['best_test_auc_epoch']}")
-"""
+
 # 生成离群点并进行可视化分析
 print("\n" + "="*60)
 print("开始进行离群点生成质量可视化分析...")
@@ -417,23 +418,8 @@ load_best_model_and_visualize(
     adj=adj,
     sample_normal_idx=sample_normal_idx,
     all_labeled_normal_idx=all_labeled_normal_idx,
-    community_H=community_H,
     ano_label=ano_label,
     idx_test=idx_test,
     records=records,
     save_dir=results_dir
 )
-
-
-# 保存最佳模型
-best_model_path = f'best_model_{args.dataset}.pth'
-torch.save({
-    'epoch': records['best_test_auc_epoch'],
-    'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
-    'best_auc': records['best_test_auc'],
-    'best_ap': records['best_test_AP'],
-    'args': args
-}, best_model_path)
-print(f"最佳模型已保存到: {best_model_path}")
-"""
