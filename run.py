@@ -52,15 +52,12 @@ parser.add_argument('--warmup_updates', type=int, default=400,
                         help='warmup steps')
 parser.add_argument('--tot_updates', type=int, default=1000,
                         help='used for optimizer learning rate scheduling')
-parser.add_argument('--alpha', type=float, default=1,
-                        help='aggregation weight')
+
 parser.add_argument('--temp', type=float, default=0.1,
                         help='temperature')
 
 # GGADFormer parameters
 
-parser.add_argument('--alpha_outlier_generation', type=float, default=2,
-                        help='alpha used in outlier generation')
 parser.add_argument('--topk_neighbors_attention', type=int, default=10,
                         help='topk neighbors attention')
 parser.add_argument('--outlier_margin', type=float, default=0.5,
