@@ -296,7 +296,8 @@ for epoch in pbar:
     # con_loss = torch.zeros_like(con_loss).to(args.device)
 
 
-    loss = dynamic_weights['bce_weight'] * loss_bce + dynamic_weights['rec_weight'] * loss_rec + dynamic_weights['con_weight'] * con_loss + dynamic_weights['community_loss_weight'] * community_loss
+    # loss = dynamic_weights['bce_weight'] * loss_bce + dynamic_weights['rec_weight'] * loss_rec + dynamic_weights['con_weight'] * con_loss + dynamic_weights['community_loss_weight'] * community_loss
+    loss = dynamic_weights['bce_weight'] * loss_bce + dynamic_weights['rec_weight'] * loss_rec + dynamic_weights['con_weight'] * con_loss 
 
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
