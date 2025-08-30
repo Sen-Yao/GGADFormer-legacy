@@ -99,7 +99,7 @@ class GGADFormer(nn.Module):
         # GT only
         proj_dim = args.hidden_dim // 4
         if args.community_embedding_dim > 0:
-            self.token_projection = nn.Linear(3 * proj_dim, args.hidden_dim)
+            self.token_projection = nn.Linear(2 * proj_dim, args.hidden_dim)
         else:
             self.token_projection = nn.Linear(2 * proj_dim, args.hidden_dim)
         encoders = [EncoderLayer(args.hidden_dim, args.ffn_dim, args.dropout, args.attention_dropout, args.n_heads)
