@@ -175,7 +175,7 @@ def adj_to_dgl_graph(adj, dataset_name: str = None):
 
     # If no dataset_name or cache not found/corrupted, perform conversion
     print(f"Converting adjacency matrix to DGLGraph for '{dataset_name if dataset_name else 'unnamed'}'...")
-    nx_graph = nx.from_scipy_sparse_array(adj)
+    nx_graph = nx.from_scipy_sparse_matrix(adj)
     # DGLGraph should be created from NetworkX graph directly for feature compatibility
     # Ensure all nodes are included even if they have no edges in nx_graph
     dgl_graph = dgl.from_networkx(nx_graph)
