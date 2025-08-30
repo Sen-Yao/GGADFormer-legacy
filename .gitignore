@@ -8,3 +8,5 @@ pre_feature*.pt
 pretrain/
 
 best_model*
+
+wandb/

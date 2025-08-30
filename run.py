@@ -11,6 +11,7 @@ from sklearn.metrics import average_precision_score
 import argparse
 from tqdm import tqdm
 import time
+import wandb
 
 # os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, [3]))
@@ -134,6 +135,17 @@ if args.num_epoch is None:
         args.num_epoch = 500
     elif args.dataset in ['Amazon']:
         args.num_epoch = 800
+run = wandb.init(
+        # Set the wandb entity where your project will be logged (generally your team name).
+        entity="HCCS",
+        # Set the wandb project where this run will be logged.
+        project="GGADFormer",
+        # Track hyperparameters and run metadata.
+        config=args,
+    )
+
+wandb.define_metric("AUC", summary="max")
+wandb.define_metric("AP", summary="max")
 
 print('Dataset: ', args.dataset)
 
@@ -353,16 +365,16 @@ for epoch in pbar:
                 print(f"新的最佳模型已保存到: {best_model_path} (AUC: {last_auc:.5f})")
             # Agent 可读的性能输出
             print(f"Epoch: {epoch:04d}, Test AUC: {last_auc:.5f}, Test AP: {last_AP:.5f}")
+            wandb.log({"AUC": last_auc, "AP": last_AP}, step=epoch)
     pbar.set_postfix({
         'time': f'{total_time:.2f}s',
         'AUC': f'{last_auc.item():.5f}',
         'AP': f'{last_AP.item():.5f}'
     })
-    records['loss_bce'].append(loss_bce.item())
-    records['loss_rec'].append(loss_rec.item())
-    records['con_loss'].append(con_loss.item()) # SGT 返回的 con_loss
-    records['community_loss'].append(community_loss.item()) 
-    records['total_loss'].append(loss.item())
+    wandb.log({ "bce_loss": loss_bce.item(),
+                            "rec_loss": loss_rec.item(),
+                            "con_loss": con_loss.item(),
+                            "train_loss": loss.item()}, step=epoch)
 
 
 results_dir = 'results'
